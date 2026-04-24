@@ -49,6 +49,24 @@ python3 -m eduplus_tools.web --host 0.0.0.0 --port 8000
 
 然后访问 `http://服务器地址:8000`。
 
+Docker：
+
+```bash
+docker compose up -d --build
+```
+
+如果你的环境还是旧版 Compose，也可以用：
+
+```bash
+docker-compose up -d --build
+```
+
+默认配置是安全偏公共服务的：
+
+- `Local output` 默认关闭
+- 公共模式 ZIP 下载完成后立即清理服务端文件
+- 未下载的公共任务结果也会按 TTL 自动清理
+
 小白一键启动：
 
 ```bash
@@ -70,13 +88,35 @@ PORT=9000 bash start_webui.sh
 
 ## Web UI 模式
 
-- `Public service`：适合公共服务部署。每个任务都会写入独立目录，例如 `downloads/web-jobs/<job-id>/`，然后提供 ZIP 整包下载。
-- `Local output`：适合自己部署自己用。任务会直接写入你填写的输出目录，例如 `downloads/`，更接近本地脚本行为。
+- `Public service`：适合公共服务部署。每个任务都会写入独立目录，例如 `downloads/web-jobs/<job-id>/`，然后提供 ZIP 整包下载。默认下载完成后立即删除服务端文件。
+- `Local output`：适合自己部署自己用。任务会直接写入你填写的输出目录，例如 `downloads/`，更接近本地脚本行为。默认关闭，需要显式开启。
 
 两种模式都会保留浏览器里的结果查看和 ZIP 下载，但默认导向不同：
 
 - 公共模式优先任务隔离和下载分发
 - 本地模式优先直接落盘到你的目录
+
+## Docker 配置
+
+常用环境变量：
+
+```text
+EDUPLUS_ENABLE_LOCAL_OUTPUT=false
+EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS=true
+EDUPLUS_PUBLIC_JOB_TTL_SECONDS=1800
+EDUPLUS_CLEANUP_INTERVAL_SECONDS=60
+EDUPLUS_PUBLIC_OUTPUT_ROOT=downloads/web-jobs
+EDUPLUS_BUNDLE_ROOT=downloads/web-bundles
+EDUPLUS_LOCAL_OUTPUT_ROOT=downloads
+```
+
+如果你确定这台服务器只有自己使用，才建议开启本地模式：
+
+```bash
+docker compose run -e EDUPLUS_ENABLE_LOCAL_OUTPUT=true eduplus-web
+```
+
+或者直接修改 `compose.yaml`。
 
 下载课件并抓取作业：
 
@@ -125,6 +165,7 @@ python3 -m eduplus_tools all \
 - `--dry-run` 只适用于 PPT 下载预览；运行 `all --dry-run` 时会跳过作业抓取。
 - Web UI 默认按次提交 SESSION，不在服务端落盘；公开部署时更安全，但仍建议加反向代理和访问控制。
 - Web UI 的 `Public service` 模式会隔离每次任务输出；`Local output` 模式则直接写入你填写的目录。
+- 公共模式下，ZIP 下载完成后会立即删除服务器上的任务文件；未下载的任务文件也会按 TTL 自动清理，减少被恶意刷盘的风险。
 
 ## 致谢
 

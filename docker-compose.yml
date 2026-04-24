@@ -1,0 +1,18 @@
+services:
+  eduplus-web:
+    build: .
+    container_name: eduplus-web
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      EDUPLUS_ENABLE_LOCAL_OUTPUT: "false"
+      EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS: "true"
+      EDUPLUS_PUBLIC_JOB_TTL_SECONDS: 1800
+      EDUPLUS_CLEANUP_INTERVAL_SECONDS: 60
+      EDUPLUS_PUBLIC_OUTPUT_ROOT: downloads/web-jobs
+      EDUPLUS_BUNDLE_ROOT: downloads/web-bundles
+      EDUPLUS_LOCAL_OUTPUT_ROOT: downloads
+    volumes:
+      - ./downloads:/app/downloads
+    restart: unless-stopped

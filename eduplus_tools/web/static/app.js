@@ -115,25 +115,52 @@ async function checkHealth() {
   }
 }
 
-function applyExecutionMode(mode) {
+async function loadServerConfig() {
+  try {
+    const response = await fetch("/api/config");
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to load config");
+    }
+
+    if (!data.enable_local_output) {
+      const localOption = executionMode.querySelector('option[value="local"]');
+      if (localOption) {
+        localOption.remove();
+      }
+      executionMode.value = "public";
+    }
+
+    if (data.public_output_root && executionMode.value === "public") {
+      outputInput.value = data.public_output_root;
+    }
+    applyExecutionMode(executionMode.value, data);
+  } catch {
+    applyExecutionMode(executionMode.value);
+  }
+}
+
+function applyExecutionMode(mode, serverConfig = null) {
   if (mode === "local") {
     modeTitle.textContent = "Local output mode";
     modeCopy.textContent = "结果直接写入你指定的本地目录，更适合自用部署。仍然保留 ZIP 下载，方便浏览器取回。";
     outputLabel.textContent = "Output Directory";
+    const defaultLocalRoot = serverConfig?.local_output_root || "downloads";
     if (!outputInput.value || outputInput.value === "downloads/web-jobs") {
-      outputInput.value = "downloads";
+      outputInput.value = defaultLocalRoot;
     }
-    outputInput.placeholder = "直接写入的本地目录，例如 downloads";
+    outputInput.placeholder = `直接写入的本地目录，例如 ${defaultLocalRoot}`;
     return;
   }
 
   modeTitle.textContent = "Public service mode";
-  modeCopy.textContent = "每次任务隔离到独立目录，适合公共服务，完成后优先通过 ZIP 下载结果。";
+  modeCopy.textContent = "每次任务隔离到独立目录，适合公共服务。ZIP 下载完成后，服务端会及时清理公共任务文件。";
   outputLabel.textContent = "Output Base";
+  const defaultPublicRoot = serverConfig?.public_output_root || "downloads/web-jobs";
   if (!outputInput.value || outputInput.value === "downloads") {
-    outputInput.value = "downloads/web-jobs";
+    outputInput.value = defaultPublicRoot;
   }
-  outputInput.placeholder = "任务隔离目录根，例如 downloads/web-jobs";
+  outputInput.placeholder = `任务隔离目录根，例如 ${defaultPublicRoot}`;
 }
 
 function collectPayload() {
@@ -237,4 +264,5 @@ executionMode.addEventListener("change", () => {
 });
 
 applyExecutionMode(executionMode.value);
+loadServerConfig();
 checkHealth();

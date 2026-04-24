@@ -3,24 +3,76 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
+import threading
+import time
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
-from .jobs import JobStore, build_job_bundle, list_job_artifacts, run_job_async, serialize_job
+from .jobs import JobStore, build_job_bundle, cleanup_job_artifacts, cleanup_job_bundle, configure_storage, list_job_artifacts, run_job_async, serialize_job
 
 
 WEB_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = WEB_ROOT / "static"
 JOB_STORE = JobStore()
+SERVER_CONFIG: "WebServerConfig | None" = None
+
+
+@dataclass(frozen=True)
+class WebServerConfig:
+    host: str
+    port: int
+    enable_local_output: bool
+    auto_delete_public_downloads: bool
+    public_job_ttl_seconds: int
+    cleanup_interval_seconds: int
+    public_output_root: Path
+    bundle_root: Path
+    local_output_root: Path
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return int(value) if value not in (None, "") else default
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="EDUPLUS Tools Web UI")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000, help="Bind port. Default: 8000")
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"), help="Bind host")
+    parser.add_argument("--port", type=int, default=env_int("PORT", 8000), help="Bind port")
+    parser.add_argument("--enable-local-output", action="store_true", default=env_bool("EDUPLUS_ENABLE_LOCAL_OUTPUT", False), help="Allow local output mode in Web UI")
+    parser.add_argument("--auto-delete-public-downloads", action="store_true", default=env_bool("EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS", True), help="Delete public job files after ZIP download")
+    parser.add_argument("--public-job-ttl-seconds", type=int, default=env_int("EDUPLUS_PUBLIC_JOB_TTL_SECONDS", 1800), help="Cleanup age for finished public jobs")
+    parser.add_argument("--cleanup-interval-seconds", type=int, default=env_int("EDUPLUS_CLEANUP_INTERVAL_SECONDS", 60), help="Background cleanup interval")
+    parser.add_argument("--public-output-root", default=os.getenv("EDUPLUS_PUBLIC_OUTPUT_ROOT", "downloads/web-jobs"), help="Base directory for isolated public jobs")
+    parser.add_argument("--bundle-root", default=os.getenv("EDUPLUS_BUNDLE_ROOT", "downloads/web-bundles"), help="Directory for generated ZIP bundles")
+    parser.add_argument("--local-output-root", default=os.getenv("EDUPLUS_LOCAL_OUTPUT_ROOT", "downloads"), help="Default local output directory")
     return parser
+
+
+def load_server_config(args: argparse.Namespace) -> WebServerConfig:
+    return WebServerConfig(
+        host=args.host,
+        port=args.port,
+        enable_local_output=bool(args.enable_local_output),
+        auto_delete_public_downloads=bool(args.auto_delete_public_downloads),
+        public_job_ttl_seconds=max(0, int(args.public_job_ttl_seconds)),
+        cleanup_interval_seconds=max(5, int(args.cleanup_interval_seconds)),
+        public_output_root=Path(args.public_output_root),
+        bundle_root=Path(args.bundle_root),
+        local_output_root=Path(args.local_output_root),
+    )
 
 
 class WebHandler(BaseHTTPRequestHandler):
@@ -33,6 +85,15 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
+            return
+        if parsed.path == "/api/config":
+            self._send_json(
+                {
+                    "enable_local_output": SERVER_CONFIG.enable_local_output if SERVER_CONFIG else False,
+                    "public_output_root": str(SERVER_CONFIG.public_output_root) if SERVER_CONFIG else "downloads/web-jobs",
+                    "local_output_root": str(SERVER_CONFIG.local_output_root) if SERVER_CONFIG else "downloads",
+                }
+            )
             return
         if parsed.path.startswith("/api/jobs/"):
             parts = [part for part in parsed.path.split("/") if part]
@@ -52,7 +113,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 if bundle_path is None:
                     self._send_json({"error": "job has no downloadable artifacts"}, status=HTTPStatus.NOT_FOUND)
                     return
-                self._serve_file(bundle_path, download_name=f"eduplus-job-{job.id}.zip")
+                cleanup_after_send = None
+                if SERVER_CONFIG and job.execution_mode == "public" and SERVER_CONFIG.auto_delete_public_downloads:
+                    cleanup_after_send = lambda: cleanup_job_artifacts(job, delete_output_root=True)
+                elif job.execution_mode == "local":
+                    cleanup_after_send = lambda: cleanup_job_bundle(job)
+                self._serve_file(bundle_path, download_name=f"eduplus-job-{job.id}.zip", cleanup_after_send=cleanup_after_send)
                 return
             if len(parts) != 3:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -83,6 +149,9 @@ class WebHandler(BaseHTTPRequestHandler):
         if command not in {"all", "ppt", "homework"}:
             self._send_json({"error": "invalid command"}, status=HTTPStatus.BAD_REQUEST)
             return
+        if str(payload.get("execution_mode") or "public").strip().lower() == "local" and SERVER_CONFIG and not SERVER_CONFIG.enable_local_output:
+            self._send_json({"error": "local output mode is disabled on this server"}, status=HTTPStatus.FORBIDDEN)
+            return
 
         job = run_job_async(JOB_STORE, payload)
         self._send_json({"job_id": job.id}, status=HTTPStatus.ACCEPTED)
@@ -90,7 +159,12 @@ class WebHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
-    def _serve_file(self, path: Path, download_name: str | None = None) -> None:
+    def _serve_file(
+        self,
+        path: Path,
+        download_name: str | None = None,
+        cleanup_after_send: Callable[[], None] | None = None,
+    ) -> None:
         if not path.exists() or not path.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -104,6 +178,9 @@ class WebHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
         self.end_headers()
         self.wfile.write(content)
+        self.wfile.flush()
+        if cleanup_after_send is not None:
+            cleanup_after_send()
 
     def _read_json_body(self) -> dict[str, object]:
         length = int(self.headers.get("Content-Length") or "0")
@@ -129,8 +206,18 @@ class WebHandler(BaseHTTPRequestHandler):
 
 def main() -> int:
     args = build_parser().parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), WebHandler)
-    print(f"EDUPLUS Web UI listening on http://{args.host}:{args.port}")
+    global SERVER_CONFIG
+    SERVER_CONFIG = load_server_config(args)
+    configure_storage(
+        public_output_root=SERVER_CONFIG.public_output_root,
+        bundle_root=SERVER_CONFIG.bundle_root,
+        local_output_root=SERVER_CONFIG.local_output_root,
+    )
+    server = ThreadingHTTPServer((SERVER_CONFIG.host, SERVER_CONFIG.port), WebHandler)
+    cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
+    cleanup_thread.start()
+    print(f"EDUPLUS Web UI listening on http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
+    print(f"Local output mode: {'enabled' if SERVER_CONFIG.enable_local_output else 'disabled'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -138,6 +225,25 @@ def main() -> int:
     finally:
         server.server_close()
     return 0
+
+
+def _cleanup_loop() -> None:
+    while True:
+        if SERVER_CONFIG is None:
+            time.sleep(5)
+            continue
+
+        now = time.time()
+        for job in JOB_STORE.all():
+            if job.execution_mode != "public" or job.cleaned_at is not None:
+                continue
+            if job.status not in {"completed", "failed"}:
+                continue
+            finished_at = job.finished_at or job.created_at
+            if SERVER_CONFIG.public_job_ttl_seconds and now - finished_at >= SERVER_CONFIG.public_job_ttl_seconds:
+                cleanup_job_artifacts(job, delete_output_root=True)
+
+        time.sleep(SERVER_CONFIG.cleanup_interval_seconds)
 
 
 if __name__ == "__main__":
