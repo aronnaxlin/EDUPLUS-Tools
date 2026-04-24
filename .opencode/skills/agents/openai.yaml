@@ -1,0 +1,4 @@
+interface:
+  display_name: "Awesome DESIGN.md"
+  short_description: "Use curated DESIGN.md references for UI style direction"
+  default_prompt: "Use an appropriate DESIGN.md reference to guide the UI style."
