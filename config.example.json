@@ -1,0 +1,9 @@
+{
+  "session": "YOUR_UPLUS_SESSION",
+  "hm_lvt": "",
+  "course_id": "YOUR_COURSE_ID",
+  "course_name": "",
+  "output": "downloads",
+  "base_url": "https://www.eduplus.net",
+  "timeout": 30
+}
