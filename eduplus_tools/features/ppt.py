@@ -4,12 +4,13 @@ import re
 import time
 import urllib.error
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .client import EduplusClient, course_referer
-from .config import safe_filename
+from ..core.client import EduplusClient, course_referer
+from ..core.config import safe_filename
 
 
 @dataclass(frozen=True)
@@ -38,14 +39,14 @@ def collect_courseware(client: EduplusClient, course_id: str) -> list[Courseware
     return list(deduped.values())
 
 
-def get_course_name(client: EduplusClient, course_id: str) -> str | None:
+def get_course_name(client: EduplusClient, course_id: str, log: Callable[[str], None] = print) -> str | None:
     referer = course_referer(client.base_url, course_id)
     path = f"/api/course/courses/v1/{urllib.parse.quote(course_id)}"
     try:
         payload = client.api_json(path, referer)
     except (urllib.error.URLError, RuntimeError, OSError) as exc:
         if client.verbose:
-            print(f"Could not fetch course name: {exc}")
+            log(f"Could not fetch course name: {exc}")
         return None
 
     data = payload.get("data")
@@ -97,7 +98,12 @@ def suffix_from_name(name: str) -> str:
     return match.group(1).lower() if match else "ppt"
 
 
-def attach_signed_urls(client: EduplusClient, course_id: str, files: list[Courseware]) -> list[Courseware]:
+def attach_signed_urls(
+    client: EduplusClient,
+    course_id: str,
+    files: list[Courseware],
+    log: Callable[[str], None] = print,
+) -> list[Courseware]:
     referer = course_referer(client.base_url, course_id)
     enriched: list[Courseware] = []
     for file in files:
@@ -107,7 +113,7 @@ def attach_signed_urls(client: EduplusClient, course_id: str, files: list[Course
         signed_url = data.get("url")
         origin_name = data.get("originFileName")
         if not payload.get("success") or not signed_url:
-            print(f"skip {file.name}: {payload.get('message') or 'missing signed URL'}")
+            log(f"skip {file.name}: {payload.get('message') or 'missing signed URL'}")
             continue
         enriched.append(
             Courseware(
@@ -157,26 +163,27 @@ def download_ppt_files(
     output_root: Path,
     dry_run: bool = False,
     overwrite: bool = False,
+    log: Callable[[str], None] = print,
 ) -> int:
-    detected_course_name = course_name or get_course_name(client, course_id)
+    detected_course_name = course_name or get_course_name(client, course_id, log=log)
     output_dir = course_output_dir(output_root, course_id, detected_course_name)
     files = collect_courseware(client, course_id)
     if not files:
-        print("No PPT/PPTX courseware found.")
+        log("No PPT/PPTX courseware found.")
         return 0
 
-    files = attach_signed_urls(client, course_id, files)
-    print(f"Found {len(files)} PPT/PPTX file(s).")
+    files = attach_signed_urls(client, course_id, files, log=log)
+    log(f"Found {len(files)} PPT/PPTX file(s).")
     if detected_course_name:
-        print(f"Course: {detected_course_name}")
-    print(f"Output directory: {output_dir}")
+        log(f"Course: {detected_course_name}")
+    log(f"Output directory: {output_dir}")
 
     if dry_run:
         for file in files:
             size = f" ({file.size_mb} MB)" if file.size_mb is not None else ""
-            print(f"{file.name}{size}")
-            print(f"  attachment_id={file.attachment_id}")
-            print(f"  url={file.signed_url}")
+            log(f"{file.name}{size}")
+            log(f"  attachment_id={file.attachment_id}")
+            log(f"  url={file.signed_url}")
         return 0
 
     referer = course_referer(client.base_url, course_id)
@@ -197,10 +204,10 @@ def download_ppt_files(
                 raise RuntimeError("response does not look like a PPT/PPTX file")
             final_path.write_bytes(data)
             ok += 1
-            print(f"[{index}/{len(files)}] downloaded {final_path} ({len(data)} bytes)")
+            log(f"[{index}/{len(files)}] downloaded {final_path} ({len(data)} bytes)")
         except (urllib.error.URLError, RuntimeError, OSError) as exc:
             failed += 1
-            print(f"[{index}/{len(files)}] failed {file.name}: {exc}")
+            log(f"[{index}/{len(files)}] failed {file.name}: {exc}")
 
-    print(f"Done. {ok} downloaded, {failed} failed.")
+    log(f"Done. {ok} downloaded, {failed} failed.")
     return 1 if failed else 0

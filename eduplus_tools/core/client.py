@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 
 from .config import EduplusConfig, HM_LVT_COOKIE_NAME
@@ -15,16 +16,17 @@ USER_AGENT = (
 
 
 class EduplusClient:
-    def __init__(self, config: EduplusConfig, verbose: bool = False) -> None:
+    def __init__(self, config: EduplusConfig, verbose: bool = False, log: Callable[[str], None] = print) -> None:
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self.timeout = config.timeout
         self.verbose = verbose
+        self.log = log
 
     def api_json(self, path: str, referer: str | None = None) -> dict[str, Any]:
         url = self.base_url + path
         if self.verbose:
-            print(f"GET {url}")
+            self.log(f"GET {url}")
         request = urllib.request.Request(url, headers=self.headers(referer=referer, accept_json=True))
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             payload = response.read()
@@ -38,7 +40,7 @@ class EduplusClient:
 
     def download_bytes(self, url: str, referer: str | None = None) -> bytes:
         if self.verbose:
-            print(f"DOWNLOAD {url}")
+            self.log(f"DOWNLOAD {url}")
         request = urllib.request.Request(url, headers=self.headers(referer=referer, accept_json=False))
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return response.read()

@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .client import EduplusClient
-from .config import load_config, mask_value
-from .homework import scrape_homework
-from .ppt import download_ppt_files
+from ..core.client import EduplusClient
+from ..core.config import load_config, mask_value
+from ..features.homework import scrape_homework
+from ..features.ppt import download_ppt_files
 
 
 def build_parser() -> argparse.ArgumentParser:

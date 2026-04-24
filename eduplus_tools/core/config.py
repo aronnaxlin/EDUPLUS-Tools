@@ -24,6 +24,14 @@ class EduplusConfig:
     config_path: Path | None = None
 
 
+def package_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def load_json_config_file(path: str | Path | None) -> tuple[dict[str, Any], Path | None]:
     if not path:
         return {}, None
@@ -42,17 +50,18 @@ def load_json_config_file(path: str | Path | None) -> tuple[dict[str, Any], Path
 
 
 def resolve_config_path(path: Path) -> Path:
-    if path.is_absolute() or path.exists():
+    if path.is_absolute():
         return path
 
     candidates = [
+        path,
         Path.cwd() / path,
-        Path(__file__).resolve().parents[1] / path,
-        Path(__file__).resolve().parent / path,
+        project_root() / path,
+        package_root() / path,
     ]
     for candidate in candidates:
         if candidate.exists():
-            return candidate
+            return candidate.resolve()
     return path
 
 

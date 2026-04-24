@@ -4,13 +4,14 @@ import json
 import re
 import time
 import urllib.parse
+from collections.abc import Callable
 from datetime import datetime
 from html import unescape
 from pathlib import Path
 from typing import Any
 
-from .client import EduplusClient
-from .config import safe_filename
+from ..core.client import EduplusClient
+from ..core.config import safe_filename
 
 
 def clean_html(text: Any) -> str:
@@ -22,11 +23,11 @@ def clean_html(text: Any) -> str:
     return text.strip()
 
 
-def get_homework_list(client: EduplusClient, course_id: str) -> list[dict[str, Any]]:
+def get_homework_list(client: EduplusClient, course_id: str, log: Callable[[str], None] = print) -> list[dict[str, Any]]:
     path = f"/api/course/homeworks/published/student?courseId={urllib.parse.quote(course_id)}"
     data = client.api_json(path)
     if not data.get("success") or "data" not in data:
-        print("Error: homework list API response is invalid.")
+        log("Error: homework list API response is invalid.")
         return []
 
     homework_items = []
@@ -39,21 +40,21 @@ def get_homework_list(client: EduplusClient, course_id: str) -> list[dict[str, A
     return [{"name": item["name"], "id": item["id"]} for item in homework_items]
 
 
-def get_question_detail(client: EduplusClient, question_id: str) -> dict[str, Any] | None:
+def get_question_detail(client: EduplusClient, question_id: str, log: Callable[[str], None] = print) -> dict[str, Any] | None:
     path = f"/api/course/homeworkQuestions/{urllib.parse.quote(question_id)}/student/detail"
     data = client.api_json(path)
     if data.get("code") not in [2000000, "OK"]:
-        print(f"Question detail API error: {data.get('message')}")
+        log(f"Question detail API error: {data.get('message')}")
         return None
     detail = data.get("data")
     return detail if isinstance(detail, dict) else None
 
 
-def get_sorted_questions(client: EduplusClient, homework_id: str) -> list[dict[str, Any]]:
+def get_sorted_questions(client: EduplusClient, homework_id: str, log: Callable[[str], None] = print) -> list[dict[str, Any]]:
     path = f"/api/course/homeworkQuestions/student?homeworkId={urllib.parse.quote(homework_id)}"
     data = client.api_json(path)
     if data.get("code") not in [2000000, "OK"]:
-        print(f"Questions API error: {data.get('message')}")
+        log(f"Questions API error: {data.get('message')}")
         return []
 
     questions = data.get("data", [])
@@ -67,7 +68,7 @@ def get_sorted_questions(client: EduplusClient, homework_id: str) -> list[dict[s
         if not question_id:
             continue
 
-        detail = get_question_detail(client, question_id)
+        detail = get_question_detail(client, question_id, log=log)
         if detail:
             question["detail"] = detail
             detailed_questions.append(question)
@@ -76,13 +77,18 @@ def get_sorted_questions(client: EduplusClient, homework_id: str) -> list[dict[s
     return detailed_questions
 
 
-def process_homework(client: EduplusClient, homework: dict[str, Any], output_dir: Path) -> Path | None:
+def process_homework(
+    client: EduplusClient,
+    homework: dict[str, Any],
+    output_dir: Path,
+    log: Callable[[str], None] = print,
+) -> Path | None:
     homework_name = str(homework["name"])
     homework_id = str(homework["id"])
     safe_name = safe_filename(homework_name, "homework")
-    questions = get_sorted_questions(client, homework_id)
+    questions = get_sorted_questions(client, homework_id, log=log)
     if not questions:
-        print(f"Could not fetch questions for '{homework_name}'.")
+        log(f"Could not fetch questions for '{homework_name}'.")
         return None
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -199,7 +205,7 @@ def write_text_output(data: dict[str, Any], text_path: Path, include_answers: bo
             out_f.write("\n")
 
 
-def convert_to_text(json_path: Path, output_dir: Path) -> Path | None:
+def convert_to_text(json_path: Path, output_dir: Path, log: Callable[[str], None] = print) -> Path | None:
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
         base_name = json_path.stem
@@ -207,46 +213,53 @@ def convert_to_text(json_path: Path, output_dir: Path) -> Path | None:
         answer_path = output_dir / "带答案" / f"{base_name}_带答案.txt"
         write_text_output(data, plain_path, include_answers=False)
         write_text_output(data, answer_path, include_answers=True)
-        print(f"Created text file: {plain_path}")
-        print(f"Created answer text file: {answer_path}")
+        log(f"Created text file: {plain_path}")
+        log(f"Created answer text file: {answer_path}")
         return plain_path
     except Exception as exc:
-        print(f"Failed to convert {json_path}: {exc}")
+        log(f"Failed to convert {json_path}: {exc}")
         return None
 
 
-def scrape_homework(client: EduplusClient, *, course_id: str, output_root: Path, convert_existing: bool = True) -> int:
+def scrape_homework(
+    client: EduplusClient,
+    *,
+    course_id: str,
+    output_root: Path,
+    convert_existing: bool = True,
+    log: Callable[[str], None] = print,
+) -> int:
     json_dir = output_root / "homework" / "json"
     text_dir = output_root / "homework" / "text"
     json_dir.mkdir(parents=True, exist_ok=True)
     text_dir.mkdir(parents=True, exist_ok=True)
 
-    homeworks = get_homework_list(client, course_id)
+    homeworks = get_homework_list(client, course_id, log=log)
     if not homeworks:
-        print("No homework found. Check config and network access.")
+        log("No homework found. Check config and network access.")
         return 1
 
-    print(f"Found {len(homeworks)} homework item(s).")
+    log(f"Found {len(homeworks)} homework item(s).")
     json_files = []
     for homework in homeworks:
-        print(f"\nProcessing homework: {homework['name']}")
-        json_path = process_homework(client, homework, json_dir)
+        log(f"\nProcessing homework: {homework['name']}")
+        json_path = process_homework(client, homework, json_dir, log=log)
         if json_path:
             json_files.append(json_path)
-            print(f"Saved JSON file: {json_path}")
+            log(f"Saved JSON file: {json_path}")
         time.sleep(1)
 
-    print("\nConverting JSON files to text...")
+    log("\nConverting JSON files to text...")
     for json_file in json_files:
-        convert_to_text(json_file, text_dir)
+        convert_to_text(json_file, text_dir, log=log)
 
     if convert_existing:
         for json_file in json_dir.glob("*.json"):
             if json_file not in json_files:
-                print(f"Converting existing file: {json_file.name}")
-                convert_to_text(json_file, text_dir)
+                log(f"Converting existing file: {json_file.name}")
+                convert_to_text(json_file, text_dir, log=log)
 
-    print("\nDone.")
-    print(f"JSON directory: {json_dir}")
-    print(f"Text directory: {text_dir}")
+    log("\nDone.")
+    log(f"JSON directory: {json_dir}")
+    log(f"Text directory: {text_dir}")
     return 0

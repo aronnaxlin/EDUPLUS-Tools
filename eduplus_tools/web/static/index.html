@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EDUPLUS Web UI</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">E</div>
+          <div>
+            <p class="eyebrow">EDUPLUS Tools</p>
+            <h1>Warm utility, not dashboard noise.</h1>
+          </div>
+        </div>
+        <p class="sidebar-copy">
+          参考 Claude 的温暖编辑感，做成适合公开部署的轻量操作台。所有任务在服务端异步执行，前端只负责提交参数和查看日志。
+        </p>
+        <div class="sidebar-card">
+          <p class="card-label">Visual Direction</p>
+          <ul class="token-list">
+            <li>Warm parchment surfaces</li>
+            <li>Terracotta action accent</li>
+            <li>Soft editorial typography</li>
+            <li>Monospace logs for operations</li>
+          </ul>
+        </div>
+        <div class="sidebar-card caution">
+          <p class="card-label">Deploy Note</p>
+          <p>
+            这是公共项目时，建议不要在服务器保存用户 SESSION。当前界面默认按次提交、按次执行。
+          </p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="hero">
+          <p class="eyebrow">Server-ready Web UI</p>
+          <h2>用一个页面完成课件下载、作业抓取和日志查看</h2>
+          <p class="hero-copy">
+            保留 CLI 作为底层能力，Web UI 只做编排层。适合后续挂在一台服务器上，用 Nginx 反向代理即可。
+          </p>
+        </section>
+
+        <section class="panel form-panel">
+          <div class="panel-head">
+            <h3>Run Task</h3>
+            <span id="health-badge" class="badge muted">Checking server</span>
+          </div>
+          <div class="mode-note">
+            <strong id="mode-title">Public service mode</strong>
+            <p id="mode-copy">每次任务隔离到独立目录，适合公共服务，完成后优先通过 ZIP 下载结果。</p>
+          </div>
+          <form id="run-form" class="form-grid">
+            <label>
+              <span>Execution Mode</span>
+              <select name="execution_mode" id="execution-mode">
+                <option value="public">Public service</option>
+                <option value="local">Local output</option>
+              </select>
+            </label>
+            <label>
+              <span>Command</span>
+              <select name="command">
+                <option value="all">all</option>
+                <option value="ppt">ppt</option>
+                <option value="homework">homework</option>
+              </select>
+            </label>
+            <label>
+              <span>Course ID</span>
+              <input name="course_id" placeholder="课程 ID" required>
+            </label>
+            <label>
+              <span>SESSION</span>
+              <input name="session" placeholder="浏览器 Cookie 中的 SESSION" required>
+            </label>
+            <label>
+              <span>Course Name</span>
+              <input name="course_name" placeholder="可选，便于目录命名">
+            </label>
+            <label>
+              <span>Hm_lvt</span>
+              <input name="hm_lvt" placeholder="可选 Cookie 值">
+            </label>
+            <label>
+              <span id="output-label">Output Base</span>
+              <input name="output" id="output-input" value="downloads/web-jobs" placeholder="服务端输出目录">
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input name="base_url" value="https://www.eduplus.net">
+            </label>
+            <label>
+              <span>Timeout</span>
+              <input name="timeout" type="number" value="30" min="1">
+            </label>
+            <label class="toggle">
+              <input name="dry_run" type="checkbox">
+              <span>Dry run</span>
+            </label>
+            <label class="toggle">
+              <input name="overwrite" type="checkbox">
+              <span>Overwrite PPT files</span>
+            </label>
+            <label class="toggle">
+              <input name="skip_existing_homework_convert" type="checkbox">
+              <span>Skip existing homework conversion</span>
+            </label>
+            <label class="toggle">
+              <input name="verbose" type="checkbox">
+              <span>Verbose request logs</span>
+            </label>
+            <div class="actions">
+              <button class="primary" type="submit">Start Job</button>
+              <button class="secondary" type="button" id="clear-log">Clear View</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel output-panel">
+          <div class="panel-head">
+            <h3>Job Output</h3>
+            <div class="job-meta">
+              <span id="job-status" class="badge muted">Idle</span>
+              <span id="job-id" class="mono subtle">No job yet</span>
+            </div>
+          </div>
+          <div id="job-summary" class="summary"></div>
+          <div id="download-actions" class="download-actions hidden">
+            <a id="download-bundle" class="download-link" href="#" download>Download ZIP Bundle</a>
+            <span id="artifact-meta" class="subtle"></span>
+          </div>
+          <div id="artifact-list" class="artifact-list hidden"></div>
+          <pre id="job-log" class="log-view">等待任务开始…</pre>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+  </html>
