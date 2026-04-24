@@ -29,7 +29,7 @@ def collect_courseware(client: EduplusClient, course_id: str) -> list[Courseware
     path = f"/api/course/chapters/tree_list?courseId={urllib.parse.quote(course_id)}"
     tree = client.api_json(path, referer)
     if not tree.get("success"):
-        raise RuntimeError(f"Failed to fetch chapter tree: {tree.get('message') or tree}")
+        raise RuntimeError(f"获取章节树失败：{tree.get('message') or tree}")
 
     files: list[Courseware] = []
     walk_chapters(tree.get("data") or [], chapter="", output=files)
@@ -46,7 +46,7 @@ def get_course_name(client: EduplusClient, course_id: str, log: Callable[[str], 
         payload = client.api_json(path, referer)
     except (urllib.error.URLError, RuntimeError, OSError) as exc:
         if client.verbose:
-            log(f"Could not fetch course name: {exc}")
+            log(f"获取课程名称失败：{exc}")
         return None
 
     data = payload.get("data")
@@ -113,7 +113,7 @@ def attach_signed_urls(
         signed_url = data.get("url")
         origin_name = data.get("originFileName")
         if not payload.get("success") or not signed_url:
-            log(f"skip {file.name}: {payload.get('message') or 'missing signed URL'}")
+            log(f"跳过 {file.name}：{payload.get('message') or '缺少签名下载链接'}")
             continue
         enriched.append(
             Courseware(
@@ -146,7 +146,7 @@ def unique_path(path: Path) -> Path:
         candidate = path.with_name(f"{stem}-{index}{suffix}")
         if not candidate.exists():
             return candidate
-    raise RuntimeError(f"Too many duplicate files for {path}")
+    raise RuntimeError(f"重名文件过多：{path}")
 
 
 def looks_like_presentation(data: bytes, filename: str) -> bool:
@@ -169,21 +169,21 @@ def download_ppt_files(
     output_dir = course_output_dir(output_root, course_id, detected_course_name)
     files = collect_courseware(client, course_id)
     if not files:
-        log("No PPT/PPTX courseware found.")
+        log("未找到 PPT/PPTX 课件。")
         return 0
 
     files = attach_signed_urls(client, course_id, files, log=log)
-    log(f"Found {len(files)} PPT/PPTX file(s).")
+    log(f"找到 {len(files)} 个 PPT/PPTX 文件。")
     if detected_course_name:
-        log(f"Course: {detected_course_name}")
-    log(f"Output directory: {output_dir}")
+        log(f"课程名称：{detected_course_name}")
+    log(f"输出目录：{output_dir}")
 
     if dry_run:
         for file in files:
             size = f" ({file.size_mb} MB)" if file.size_mb is not None else ""
             log(f"{file.name}{size}")
-            log(f"  attachment_id={file.attachment_id}")
-            log(f"  url={file.signed_url}")
+            log(f"  附件 ID：{file.attachment_id}")
+            log(f"  下载链接：{file.signed_url}")
         return 0
 
     referer = course_referer(client.base_url, course_id)
@@ -196,18 +196,18 @@ def download_ppt_files(
         destination = output_dir / filename
         try:
             if file.signed_url is None:
-                raise RuntimeError("missing signed URL")
+                raise RuntimeError("缺少签名下载链接")
             data = client.download_bytes(file.signed_url, referer)
             final_path = destination if overwrite else unique_path(destination)
             final_path.parent.mkdir(parents=True, exist_ok=True)
             if not looks_like_presentation(data, final_path.name):
-                raise RuntimeError("response does not look like a PPT/PPTX file")
+                raise RuntimeError("返回内容不是有效的 PPT/PPTX 文件")
             final_path.write_bytes(data)
             ok += 1
-            log(f"[{index}/{len(files)}] downloaded {final_path} ({len(data)} bytes)")
+            log(f"[{index}/{len(files)}] 已下载 {final_path}（{len(data)} 字节）")
         except (urllib.error.URLError, RuntimeError, OSError) as exc:
             failed += 1
-            log(f"[{index}/{len(files)}] failed {file.name}: {exc}")
+            log(f"[{index}/{len(files)}] 下载失败 {file.name}：{exc}")
 
-    log(f"Done. {ok} downloaded, {failed} failed.")
+    log(f"完成。成功 {ok} 个，失败 {failed} 个。")
     return 1 if failed else 0

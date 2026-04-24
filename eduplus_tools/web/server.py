@@ -48,16 +48,16 @@ def env_int(name: str, default: int) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="EDUPLUS Tools Web UI")
-    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"), help="Bind host")
-    parser.add_argument("--port", type=int, default=env_int("PORT", 8000), help="Bind port")
-    parser.add_argument("--enable-local-output", action="store_true", default=env_bool("EDUPLUS_ENABLE_LOCAL_OUTPUT", False), help="Allow local output mode in Web UI")
-    parser.add_argument("--auto-delete-public-downloads", action="store_true", default=env_bool("EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS", True), help="Delete public job files after ZIP download")
-    parser.add_argument("--public-job-ttl-seconds", type=int, default=env_int("EDUPLUS_PUBLIC_JOB_TTL_SECONDS", 1800), help="Cleanup age for finished public jobs")
-    parser.add_argument("--cleanup-interval-seconds", type=int, default=env_int("EDUPLUS_CLEANUP_INTERVAL_SECONDS", 60), help="Background cleanup interval")
-    parser.add_argument("--public-output-root", default=os.getenv("EDUPLUS_PUBLIC_OUTPUT_ROOT", "downloads/web-jobs"), help="Base directory for isolated public jobs")
-    parser.add_argument("--bundle-root", default=os.getenv("EDUPLUS_BUNDLE_ROOT", "downloads/web-bundles"), help="Directory for generated ZIP bundles")
-    parser.add_argument("--local-output-root", default=os.getenv("EDUPLUS_LOCAL_OUTPUT_ROOT", "downloads"), help="Default local output directory")
+    parser = argparse.ArgumentParser(description="EDUPLUS 网页界面")
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"), help="监听地址")
+    parser.add_argument("--port", type=int, default=env_int("PORT", 8000), help="监听端口")
+    parser.add_argument("--enable-local-output", action="store_true", default=env_bool("EDUPLUS_ENABLE_LOCAL_OUTPUT", False), help="允许在网页界面中使用本地输出模式")
+    parser.add_argument("--auto-delete-public-downloads", action="store_true", default=env_bool("EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS", True), help="下载 ZIP 后自动删除公共模式任务文件")
+    parser.add_argument("--public-job-ttl-seconds", type=int, default=env_int("EDUPLUS_PUBLIC_JOB_TTL_SECONDS", 1800), help="公共模式任务文件保留时长")
+    parser.add_argument("--cleanup-interval-seconds", type=int, default=env_int("EDUPLUS_CLEANUP_INTERVAL_SECONDS", 60), help="后台清理间隔")
+    parser.add_argument("--public-output-root", default=os.getenv("EDUPLUS_PUBLIC_OUTPUT_ROOT", "downloads/web-jobs"), help="公共模式任务隔离目录")
+    parser.add_argument("--bundle-root", default=os.getenv("EDUPLUS_BUNDLE_ROOT", "downloads/web-bundles"), help="ZIP 打包输出目录")
+    parser.add_argument("--local-output-root", default=os.getenv("EDUPLUS_LOCAL_OUTPUT_ROOT", "downloads"), help="本地输出模式默认目录")
     return parser
 
 
@@ -103,7 +103,7 @@ class WebHandler(BaseHTTPRequestHandler):
             job_id = parts[2]
             job = JOB_STORE.get(job_id)
             if job is None:
-                self._send_json({"error": "job not found"}, status=HTTPStatus.NOT_FOUND)
+                self._send_json({"error": "未找到任务"}, status=HTTPStatus.NOT_FOUND)
                 return
             if len(parts) == 4 and parts[3] == "artifacts":
                 self._send_json(list_job_artifacts(job))
@@ -111,7 +111,7 @@ class WebHandler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[3] == "bundle.zip":
                 bundle_path = build_job_bundle(job)
                 if bundle_path is None:
-                    self._send_json({"error": "job has no downloadable artifacts"}, status=HTTPStatus.NOT_FOUND)
+                    self._send_json({"error": "当前任务没有可下载文件"}, status=HTTPStatus.NOT_FOUND)
                     return
                 cleanup_after_send = None
                 if SERVER_CONFIG and job.execution_mode == "public" and SERVER_CONFIG.auto_delete_public_downloads:
@@ -147,10 +147,10 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         command = str(payload.get("command") or "all")
         if command not in {"all", "ppt", "homework"}:
-            self._send_json({"error": "invalid command"}, status=HTTPStatus.BAD_REQUEST)
+            self._send_json({"error": "不支持的任务类型"}, status=HTTPStatus.BAD_REQUEST)
             return
         if str(payload.get("execution_mode") or "public").strip().lower() == "local" and SERVER_CONFIG and not SERVER_CONFIG.enable_local_output:
-            self._send_json({"error": "local output mode is disabled on this server"}, status=HTTPStatus.FORBIDDEN)
+            self._send_json({"error": "当前服务未开启本地输出模式"}, status=HTTPStatus.FORBIDDEN)
             return
 
         job = run_job_async(JOB_STORE, payload)
@@ -188,11 +188,11 @@ class WebHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
-            self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
-            raise ValueError("invalid json body")
+            self._send_json({"error": "请求内容不是有效的 JSON"}, status=HTTPStatus.BAD_REQUEST)
+            raise ValueError("请求内容不是有效的 JSON")
         if not isinstance(payload, dict):
-            self._send_json({"error": "json body must be an object"}, status=HTTPStatus.BAD_REQUEST)
-            raise ValueError("json body must be an object")
+            self._send_json({"error": "请求内容必须是 JSON 对象"}, status=HTTPStatus.BAD_REQUEST)
+            raise ValueError("请求内容必须是 JSON 对象")
         return payload
 
     def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -216,8 +216,8 @@ def main() -> int:
     server = ThreadingHTTPServer((SERVER_CONFIG.host, SERVER_CONFIG.port), WebHandler)
     cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup_thread.start()
-    print(f"EDUPLUS Web UI listening on http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
-    print(f"Local output mode: {'enabled' if SERVER_CONFIG.enable_local_output else 'disabled'}")
+    print(f"EDUPLUS 网页界面已启动：http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
+    print(f"本地输出模式：{'已开启' if SERVER_CONFIG.enable_local_output else '未开启'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

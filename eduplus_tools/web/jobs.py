@@ -216,9 +216,9 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                 "session": mask_value(config.session),
             },
         )
-        log(f"Course ID: {config.course_id}")
+        log(f"课程 ID：{config.course_id}")
         log(f"SESSION: {mask_value(config.session)}")
-        log(f"Output: {output_root}")
+        log(f"输出目录：{output_root}")
 
         status = 0
         command = str(payload.get("command") or "all")
@@ -248,7 +248,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                 ),
             )
         elif command == "all" and bool(payload.get("dry_run")):
-            log("Skipping homework because --dry-run only applies to ppt downloads.")
+            log("已跳过作业抓取，--dry-run 仅用于课件下载预览。")
 
         artifacts = list_job_artifacts(
             job_store.get(job_id) or Job(id=job_id, command=command, execution_mode=execution_mode, output_root=str(output_root))
@@ -257,17 +257,17 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
             "mode": execution_mode_label(execution_mode),
             **config_summary(config, output_root),
             "artifacts": str(artifacts["artifact_count"]),
-            "bundle": "ready" if artifacts["artifact_count"] else "empty",
+            "bundle": "可下载" if artifacts["artifact_count"] else "无文件",
         }
         job_store.update(job_id, status="completed", exit_code=status, finished_at=time.time())
         job_store.update(job_id, summary=summary)
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 1
-        message = str(exc.code) if exc.code not in (None, 0) else "Job stopped."
+        message = str(exc.code) if exc.code not in (None, 0) else "任务已停止。"
         log(message)
         job_store.update(job_id, status="failed", exit_code=code, finished_at=time.time())
     except Exception as exc:
-        log(f"Unhandled error: {exc}")
+        log(f"未处理异常：{exc}")
         job_store.update(job_id, status="failed", exit_code=1, finished_at=time.time())
 
 
@@ -304,4 +304,4 @@ def normalize_execution_mode(value: object) -> str:
 
 
 def execution_mode_label(mode: str) -> str:
-    return "Local output" if mode == "local" else "Public service"
+    return "本地输出" if mode == "local" else "公共模式"

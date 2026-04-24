@@ -27,7 +27,7 @@ def get_homework_list(client: EduplusClient, course_id: str, log: Callable[[str]
     path = f"/api/course/homeworks/published/student?courseId={urllib.parse.quote(course_id)}"
     data = client.api_json(path)
     if not data.get("success") or "data" not in data:
-        log("Error: homework list API response is invalid.")
+        log("作业列表接口返回异常。")
         return []
 
     homework_items = []
@@ -44,7 +44,7 @@ def get_question_detail(client: EduplusClient, question_id: str, log: Callable[[
     path = f"/api/course/homeworkQuestions/{urllib.parse.quote(question_id)}/student/detail"
     data = client.api_json(path)
     if data.get("code") not in [2000000, "OK"]:
-        log(f"Question detail API error: {data.get('message')}")
+        log(f"题目详情接口错误：{data.get('message')}")
         return None
     detail = data.get("data")
     return detail if isinstance(detail, dict) else None
@@ -54,7 +54,7 @@ def get_sorted_questions(client: EduplusClient, homework_id: str, log: Callable[
     path = f"/api/course/homeworkQuestions/student?homeworkId={urllib.parse.quote(homework_id)}"
     data = client.api_json(path)
     if data.get("code") not in [2000000, "OK"]:
-        log(f"Questions API error: {data.get('message')}")
+        log(f"题目列表接口错误：{data.get('message')}")
         return []
 
     questions = data.get("data", [])
@@ -88,7 +88,7 @@ def process_homework(
     safe_name = safe_filename(homework_name, "homework")
     questions = get_sorted_questions(client, homework_id, log=log)
     if not questions:
-        log(f"Could not fetch questions for '{homework_name}'.")
+        log(f"无法获取《{homework_name}》的题目详情。")
         return None
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -213,11 +213,11 @@ def convert_to_text(json_path: Path, output_dir: Path, log: Callable[[str], None
         answer_path = output_dir / "带答案" / f"{base_name}_带答案.txt"
         write_text_output(data, plain_path, include_answers=False)
         write_text_output(data, answer_path, include_answers=True)
-        log(f"Created text file: {plain_path}")
-        log(f"Created answer text file: {answer_path}")
+        log(f"已生成文本文件：{plain_path}")
+        log(f"已生成带答案文本：{answer_path}")
         return plain_path
     except Exception as exc:
-        log(f"Failed to convert {json_path}: {exc}")
+        log(f"转换失败：{json_path}：{exc}")
         return None
 
 
@@ -236,30 +236,30 @@ def scrape_homework(
 
     homeworks = get_homework_list(client, course_id, log=log)
     if not homeworks:
-        log("No homework found. Check config and network access.")
+        log("未找到作业，请检查 SESSION、课程 ID 或网络。")
         return 1
 
-    log(f"Found {len(homeworks)} homework item(s).")
+    log(f"找到 {len(homeworks)} 份作业。")
     json_files = []
     for homework in homeworks:
-        log(f"\nProcessing homework: {homework['name']}")
+        log(f"\n正在处理作业：{homework['name']}")
         json_path = process_homework(client, homework, json_dir, log=log)
         if json_path:
             json_files.append(json_path)
-            log(f"Saved JSON file: {json_path}")
+            log(f"已保存 JSON：{json_path}")
         time.sleep(1)
 
-    log("\nConverting JSON files to text...")
+    log("\n正在把 JSON 转成文本...")
     for json_file in json_files:
         convert_to_text(json_file, text_dir, log=log)
 
     if convert_existing:
         for json_file in json_dir.glob("*.json"):
             if json_file not in json_files:
-                log(f"Converting existing file: {json_file.name}")
+                log(f"正在转换已有文件：{json_file.name}")
                 convert_to_text(json_file, text_dir, log=log)
 
-    log("\nDone.")
-    log(f"JSON directory: {json_dir}")
-    log(f"Text directory: {text_dir}")
+    log("\n处理完成。")
+    log(f"JSON 目录：{json_dir}")
+    log(f"文本目录：{text_dir}")
     return 0

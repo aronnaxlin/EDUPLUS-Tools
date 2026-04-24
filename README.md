@@ -1,8 +1,8 @@
-# EDUPLUS Tools
+# EDUPLUS 工具
 
-基于原 PPT 下载器和作业抓取脚本重做的新版 U+ / EDUPLUS 工具箱，用同一份登录配置处理同一门课的课件和作业。
+用于下载 EDUPLUS 课件和抓取作业内容的工具，支持命令行和网页界面两种使用方式。
 
-## 文件分类
+## 目录说明
 
 ```text
 eduplus_tools/
@@ -15,7 +15,7 @@ eduplus_tools/
     ppt.py      # PPT/PPTX 课件下载
     homework.py # 作业抓取、JSON 保存、文本转换
   web/
-    server.py   # Web UI 服务入口
+    server.py   # 网页界面服务入口
     static/     # HTML/CSS/JS 静态资源
 
 config.json          # 本地真实配置，不要提交
@@ -31,23 +31,23 @@ downloads/
 
 ## 配置
 
-复制配置模板并填写自己的 `SESSION` 和课程 ID：
+复制配置模板，并填写自己的 `SESSION` 和课程 ID：
 
 ```bash
 cp config.example.json config.json
 ```
 
-`config.json` 已加入 `.gitignore`，不要提交自己的登录信息。如果 Session 过期，重新从浏览器 Cookie 里复制 `SESSION` 后更新配置即可。
+`config.json` 已加入 `.gitignore`，不要提交自己的登录信息。如果 `SESSION` 失效，重新从浏览器 Cookie 中复制后更新即可。
 
-## 运行
+## 启动方式
 
-Web UI：
+网页界面：
 
 ```bash
 python3 -m eduplus_tools.web --host 0.0.0.0 --port 8000
 ```
 
-然后访问 `http://服务器地址:8000`。
+启动后访问 `http://服务器地址:8000`。
 
 Docker：
 
@@ -61,24 +61,34 @@ docker compose up -d --build
 docker-compose up -d --build
 ```
 
-默认配置是安全偏公共服务的：
+默认配置更适合公共部署：
 
-- `Local output` 默认关闭
-- 公共模式 ZIP 下载完成后立即清理服务端文件
+- `本地输出` 默认关闭
+- 公共模式下，ZIP 下载完成后会立即清理服务端文件
 - 未下载的公共任务结果也会按 TTL 自动清理
 
-小白一键启动：
+常见启动方式：
+
+```bash
+# 改端口
+PORT=9000 docker compose up -d --build
+
+# 开启本地输出模式
+EDUPLUS_ENABLE_LOCAL_OUTPUT=true docker compose up -d --build
+```
+
+一键启动：
 
 ```bash
 bash start_webui.sh
 ```
 
-这个脚本会自动：
+脚本会自动执行以下步骤：
 
 - 创建 `.venv` 虚拟环境
 - 升级 `pip`
 - 安装 `requirements.txt`
-- 启动 Web UI
+- 启动网页界面
 
 也可以自定义端口：
 
@@ -86,12 +96,25 @@ bash start_webui.sh
 PORT=9000 bash start_webui.sh
 ```
 
-## Web UI 模式
+也支持直接把最新的网页界面参数带进去：
 
-- `Public service`：适合公共服务部署。每个任务都会写入独立目录，例如 `downloads/web-jobs/<job-id>/`，然后提供 ZIP 整包下载。默认下载完成后立即删除服务端文件。
-- `Local output`：适合自己部署自己用。任务会直接写入你填写的输出目录，例如 `downloads/`，更接近本地脚本行为。默认关闭，需要显式开启。
+```bash
+# 开启本地输出模式
+bash start_webui.sh --enable-local-output
 
-两种模式都会保留浏览器里的结果查看和 ZIP 下载，但默认导向不同：
+# 调整公共模式目录和清理时间
+bash start_webui.sh \
+  --public-output-root downloads/web-jobs \
+  --bundle-root downloads/web-bundles \
+  --public-job-ttl-seconds 3600
+```
+
+## 网页界面模式
+
+- `公共模式`：适合公共部署。每个任务都会写入独立目录，例如 `downloads/web-jobs/<job-id>/`，完成后可下载 ZIP。默认在下载完成后立即删除服务端文件。
+- `本地输出`：适合自己部署自己使用。任务会直接写入你填写的输出目录，例如 `downloads/`。默认关闭，需要显式开启。
+
+两种模式都支持在浏览器中查看结果和下载 ZIP，主要区别是默认输出位置不同：
 
 - 公共模式优先任务隔离和下载分发
 - 本地模式优先直接落盘到你的目录
@@ -110,13 +133,15 @@ EDUPLUS_BUNDLE_ROOT=downloads/web-bundles
 EDUPLUS_LOCAL_OUTPUT_ROOT=downloads
 ```
 
-如果你确定这台服务器只有自己使用，才建议开启本地模式：
+如果你确定这台服务器只给自己使用，才建议开启 `本地输出`：
 
 ```bash
-docker compose run -e EDUPLUS_ENABLE_LOCAL_OUTPUT=true eduplus-web
+EDUPLUS_ENABLE_LOCAL_OUTPUT=true docker compose up -d --build
 ```
 
-或者直接修改 `compose.yaml`。
+也可以直接修改 `docker-compose.yml`，或通过 `.env` 文件覆盖这些变量。
+
+## 命令行用法
 
 下载课件并抓取作业：
 
@@ -147,7 +172,7 @@ python3 -m eduplus_tools homework
 ```bash
 python3 -m eduplus_tools all \
   --session "新的SESSION" \
-  --course-id "新的Course ID"
+  --course-id "新的课程 ID"
 ```
 
 ## 配置优先级
@@ -156,15 +181,15 @@ python3 -m eduplus_tools all \
 命令行参数 > --config-json > config.json > 默认值
 ```
 
-`config.json` 仍然默认从当前工作目录读取；如果当前目录没有，也会回退尝试仓库根目录和包目录，避免内部文件夹重组后路径识别出错。
+`config.json` 默认从当前工作目录读取；如果当前目录没有，也会回退尝试仓库根目录和包目录，避免目录结构调整后找不到配置文件。
 
-## 注意
+## 说明
 
 - `config.json`、`downloads/` 已加入 `.gitignore`。
 - 作业接口返回答案字段时，工具会同时生成“不带答案”和“带答案”两个文本版本。
 - `--dry-run` 只适用于 PPT 下载预览；运行 `all --dry-run` 时会跳过作业抓取。
-- Web UI 默认按次提交 SESSION，不在服务端落盘；公开部署时更安全，但仍建议加反向代理和访问控制。
-- Web UI 的 `Public service` 模式会隔离每次任务输出；`Local output` 模式则直接写入你填写的目录。
+- 网页界面默认按次提交 `SESSION`，不会在服务端落盘；公开部署时更安全，但仍建议加反向代理和访问控制。
+- 网页界面的 `公共模式` 会隔离每次任务输出；`本地输出` 会直接写入你填写的目录。
 - 公共模式下，ZIP 下载完成后会立即删除服务器上的任务文件；未下载的任务文件也会按 TTL 自动清理，减少被恶意刷盘的风险。
 
 ## 致谢

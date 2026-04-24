@@ -1,9 +1,15 @@
 .git/
 .venv/
 .opencode/
+.codex/
+.playwright-mcp/
 downloads/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .DS_Store
+edup-webui-preview*.png
+scale-check-*.png
+theme-*.png
+webui-*.log

@@ -3,142 +3,359 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>EDUPLUS Web UI</title>
+    <title>EDUPLUS 网页界面</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23cc6237'/%3E%3Ctext x='50%25' y='56%25' text-anchor='middle' dominant-baseline='middle' font-family='Georgia,serif' font-size='38' fill='white'%3EE%3C/text%3E%3C/svg%3E">
+    <script>
+      (function () {
+        try {
+          var savedTheme = localStorage.getItem("eduplus-theme");
+          var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = savedTheme || (prefersDark ? "dark" : "light");
+        } catch (error) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="/static/style.css">
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="topbar-left">
           <div class="brand-mark">E</div>
-          <div>
-            <p class="eyebrow">EDUPLUS Tools</p>
-            <h1>Warm utility, not dashboard noise.</h1>
+          <div class="brand-copy">
+            <span class="brand-name">EDUPLUS 工具</span>
+            <span class="brand-subtitle">课件与作业工具</span>
           </div>
+          <span id="health-badge" class="badge muted">检查服务中</span>
         </div>
-        <p class="sidebar-copy">
-          参考 Claude 的温暖编辑感，做成适合公开部署的轻量操作台。所有任务在服务端异步执行，前端只负责提交参数和查看日志。
-        </p>
-        <div class="sidebar-card">
-          <p class="card-label">Visual Direction</p>
-          <ul class="token-list">
-            <li>Warm parchment surfaces</li>
-            <li>Terracotta action accent</li>
-            <li>Soft editorial typography</li>
-            <li>Monospace logs for operations</li>
-          </ul>
-        </div>
-        <div class="sidebar-card caution">
-          <p class="card-label">Deploy Note</p>
-          <p>
-            这是公共项目时，建议不要在服务器保存用户 SESSION。当前界面默认按次提交、按次执行。
-          </p>
-        </div>
-      </aside>
+        <nav class="topbar-nav" aria-label="快捷操作">
+          <a class="nav-link" href="https://github.com/aronnaxlin/EDUPLUS-Tools" target="_blank" rel="noreferrer">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 17H20V4.5A2.5 2.5 0 0 0 17.5 2H6.5A2.5 2.5 0 0 0 4 4.5v15Z"></path>
+                <path d="M8 7h8"></path>
+              </svg>
+            </span>
+            <span>文档</span>
+          </a>
+          <a class="nav-link" href="https://github.com/aronnaxlin/EDUPLUS-Tools/issues" target="_blank" rel="noreferrer">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .16 1.7 1.7 0 0 0-.98 1.54V21a2 2 0 1 1-4 0v-.08A1.7 1.7 0 0 0 8 19.4a1.7 1.7 0 0 0-1-.16 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.16-1 1.7 1.7 0 0 0-1.54-.98H2.92a2 2 0 1 1 0-4H3a1.7 1.7 0 0 0 1.54-.98 1.7 1.7 0 0 0 .16-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8 4.6a1.7 1.7 0 0 0 1-.16A1.7 1.7 0 0 0 9.98 2.9V2.92a2 2 0 1 1 4 0V3a1.7 1.7 0 0 0 .98 1.54 1.7 1.7 0 0 0 1 .16 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c0 .35.06.69.16 1a1.7 1.7 0 0 0 1.54.98h.08a2 2 0 1 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+              </svg>
+            </span>
+            <span>反馈</span>
+          </a>
+          <button class="nav-link icon-only" type="button" id="theme-toggle" aria-label="切换到夜间模式" title="切换到夜间模式">
+            <span class="nav-icon theme-icon theme-icon-sun" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2.5"></path>
+                <path d="M12 19.5V22"></path>
+                <path d="m4.93 4.93 1.77 1.77"></path>
+                <path d="m17.3 17.3 1.77 1.77"></path>
+                <path d="M2 12h2.5"></path>
+                <path d="M19.5 12H22"></path>
+                <path d="m4.93 19.07 1.77-1.77"></path>
+                <path d="m17.3 6.7 1.77-1.77"></path>
+              </svg>
+            </span>
+            <span class="nav-icon theme-icon theme-icon-moon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3a7.5 7.5 0 1 0 9 9A9 9 0 1 1 12 3Z"></path>
+              </svg>
+            </span>
+          </button>
+        </nav>
+      </header>
 
-      <main class="main">
-        <section class="hero">
-          <p class="eyebrow">Server-ready Web UI</p>
-          <h2>用一个页面完成课件下载、作业抓取和日志查看</h2>
-          <p class="hero-copy">
-            保留 CLI 作为底层能力，Web UI 只做编排层。适合后续挂在一台服务器上，用 Nginx 反向代理即可。
-          </p>
-        </section>
+      <div class="workspace">
+        <aside class="story-panel">
+          <div class="story-copy">
+            <p class="story-kicker">使用说明</p>
+            <h1>课件和作业处理</h1>
+            <div class="story-accent" aria-hidden="true"></div>
+            <p class="lead">
+              填好课程信息和 SESSION 后即可提交任务。系统会按任务分别处理，并提供结果下载。
+            </p>
+          </div>
 
-        <section class="panel form-panel">
-          <div class="panel-head">
-            <h3>Run Task</h3>
-            <span id="health-badge" class="badge muted">Checking server</span>
+          <div class="capability-list">
+            <article class="capability-item">
+              <div class="capability-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v12"></path>
+                  <path d="m7 10 5 5 5-5"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+              </div>
+              <div>
+                <h2>课件下载</h2>
+                <p>按课程获取全部可用课件与资源文件。</p>
+              </div>
+            </article>
+
+            <article class="capability-item">
+              <div class="capability-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 3h7l4 4v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"></path>
+                  <path d="M15 3v5h5"></path>
+                  <path d="M10 13h6"></path>
+                  <path d="M10 17h4"></path>
+                </svg>
+              </div>
+              <div>
+                <h2>作业抓取</h2>
+                <p>抓取课程作业列表与详情，结构化存储。</p>
+              </div>
+            </article>
+
+            <article class="capability-item">
+              <div class="capability-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h11A2.5 2.5 0 0 1 20 8.5V10H4V8.5Z"></path>
+                  <path d="M4 10h16v8.5A2.5 2.5 0 0 1 17.5 21h-11A2.5 2.5 0 0 1 4 18.5V10Z"></path>
+                  <path d="M9 6V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V6"></path>
+                </svg>
+              </div>
+              <div>
+                <h2>结果打包</h2>
+                <p>自动整理输出内容，可直接下载 ZIP 包。</p>
+              </div>
+            </article>
           </div>
-          <div class="mode-note">
-            <strong id="mode-title">Public service mode</strong>
-            <p id="mode-copy">每次任务隔离到独立目录，适合公共服务，完成后优先通过 ZIP 下载结果。</p>
+
+          <div class="trust-note">
+            <span class="trust-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3 5 6v5c0 5 3.4 8.74 7 10 3.6-1.26 7-5 7-10V6l-7-3Z"></path>
+                <path d="m9.5 12 1.8 1.8 3.2-3.6"></path>
+              </svg>
+            </span>
+            <p>仅处理你授权的课程数据，所有任务在隔离环境中运行，不保留 SESSION。</p>
           </div>
-          <form id="run-form" class="form-grid">
-            <label>
-              <span>Execution Mode</span>
-              <select name="execution_mode" id="execution-mode">
-                <option value="public">Public service</option>
-                <option value="local">Local output</option>
-              </select>
-            </label>
-            <label>
-              <span>Command</span>
-              <select name="command">
-                <option value="all">all</option>
-                <option value="ppt">ppt</option>
-                <option value="homework">homework</option>
-              </select>
-            </label>
-            <label>
-              <span>Course ID</span>
-              <input name="course_id" placeholder="课程 ID" required>
-            </label>
-            <label>
-              <span>SESSION</span>
-              <input name="session" placeholder="浏览器 Cookie 中的 SESSION" required>
-            </label>
-            <label>
-              <span>Course Name</span>
-              <input name="course_name" placeholder="可选，便于目录命名">
-            </label>
-            <label>
-              <span>Hm_lvt</span>
-              <input name="hm_lvt" placeholder="可选 Cookie 值">
-            </label>
-            <label>
-              <span id="output-label">Output Base</span>
-              <input name="output" id="output-input" value="downloads/web-jobs" placeholder="服务端输出目录">
-            </label>
-            <label>
-              <span>Base URL</span>
-              <input name="base_url" value="https://www.eduplus.net">
-            </label>
-            <label>
-              <span>Timeout</span>
-              <input name="timeout" type="number" value="30" min="1">
-            </label>
-            <label class="toggle">
-              <input name="dry_run" type="checkbox">
-              <span>Dry run</span>
-            </label>
-            <label class="toggle">
-              <input name="overwrite" type="checkbox">
-              <span>Overwrite PPT files</span>
-            </label>
-            <label class="toggle">
-              <input name="skip_existing_homework_convert" type="checkbox">
-              <span>Skip existing homework conversion</span>
-            </label>
-            <label class="toggle">
-              <input name="verbose" type="checkbox">
-              <span>Verbose request logs</span>
-            </label>
-            <div class="actions">
-              <button class="primary" type="submit">Start Job</button>
-              <button class="secondary" type="button" id="clear-log">Clear View</button>
+        </aside>
+
+        <main class="canvas-panel">
+          <section class="panel job-panel">
+            <div class="job-panel-head">
+              <div>
+                <p class="panel-kicker">任务配置</p>
+                <h2>提交任务</h2>
+                <p id="mode-copy" class="panel-copy">每次任务会单独处理，适合在公共环境中使用，完成后可下载 ZIP 结果。</p>
+              </div>
+              <div class="mode-toggle" role="tablist" aria-label="运行模式">
+                <button class="mode-pill is-active" type="button" data-mode="public" aria-pressed="true">
+                  <span class="mode-pill-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 3 4 7v5c0 5 3.2 8.4 8 10 4.8-1.6 8-5 8-10V7l-8-4Z"></path>
+                      <path d="m9.5 12 1.7 1.7 3.3-3.7"></path>
+                    </svg>
+                  </span>
+                  <span class="mode-pill-copy">
+                    <strong>公共模式</strong>
+                    <small>按任务隔离处理并提供 ZIP 下载</small>
+                  </span>
+                </button>
+                <button class="mode-pill" type="button" data-mode="local" aria-pressed="false">
+                  <span class="mode-pill-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11Z"></path>
+                      <path d="M8 9h8"></path>
+                      <path d="M8 13h5"></path>
+                    </svg>
+                  </span>
+                  <span class="mode-pill-copy">
+                    <strong>本地输出</strong>
+                    <small>结果直接写入你指定的目录</small>
+                  </span>
+                </button>
+              </div>
             </div>
-          </form>
-        </section>
 
-        <section class="panel output-panel">
-          <div class="panel-head">
-            <h3>Job Output</h3>
-            <div class="job-meta">
-              <span id="job-status" class="badge muted">Idle</span>
-              <span id="job-id" class="mono subtle">No job yet</span>
+            <form id="run-form" class="job-form">
+              <select name="execution_mode" id="execution-mode" class="sr-only">
+                <option value="public">公共模式</option>
+                <option value="local">本地输出</option>
+              </select>
+
+              <div class="job-form-grid">
+                <label class="field">
+                  <span>任务类型</span>
+                  <select name="command">
+                    <option value="all">全部</option>
+                    <option value="ppt">课件</option>
+                    <option value="homework">作业</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>课程 ID</span>
+                  <input name="course_id" placeholder="如：123456" required>
+                </label>
+
+                <label class="field">
+                  <span>SESSION</span>
+                  <input name="session" placeholder="粘贴你的 EDUPLUS SESSION" required>
+                </label>
+
+                <label class="field">
+                  <span>课程名称（可选）</span>
+                  <input name="course_name" placeholder="如：高等数学（上）">
+                </label>
+
+                <label class="field field-wide">
+                  <span id="output-label">输出目录</span>
+                  <input name="output" id="output-input" value="downloads/web-jobs" placeholder="如：D:/EDUPLUS/Downloads">
+                </label>
+
+                <div class="toggle-grid field-wide">
+                  <label class="toggle-card">
+                    <span class="toggle-copy">
+                      <strong>仅预览</strong>
+                      <small>仅预览操作，不写入任何文件</small>
+                    </span>
+                    <span class="switch">
+                      <input name="dry_run" type="checkbox">
+                      <span class="switch-ui" aria-hidden="true"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-card">
+                    <span class="toggle-copy">
+                      <strong>覆盖已有文件</strong>
+                      <small>如已存在 PPT 文件，则重新下载</small>
+                    </span>
+                    <span class="switch">
+                      <input name="overwrite" type="checkbox">
+                      <span class="switch-ui" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                </div>
+
+                <div class="advanced-row field-wide">
+                  <div class="advanced-head">
+                    <span class="panel-kicker">更多选项</span>
+                    <p id="mode-title">公共模式</p>
+                  </div>
+
+                  <div class="advanced-grid">
+                    <label class="field">
+                      <span>Hm_lvt</span>
+                      <input name="hm_lvt" placeholder="可选 Cookie 值">
+                    </label>
+
+                    <label class="field">
+                      <span>Base URL</span>
+                      <input name="base_url" value="https://www.eduplus.net">
+                    </label>
+
+                    <label class="field">
+                      <span>Timeout（秒）</span>
+                      <input name="timeout" type="number" value="30" min="1">
+                    </label>
+
+                    <div class="toggle-stack">
+                      <label class="toggle-card compact">
+                        <span class="toggle-copy">
+                          <strong>跳过已有转换</strong>
+                          <small>跳过现有作业文本转换</small>
+                        </span>
+                        <span class="switch">
+                          <input name="skip_existing_homework_convert" type="checkbox">
+                          <span class="switch-ui" aria-hidden="true"></span>
+                        </span>
+                      </label>
+
+                      <label class="toggle-card compact">
+                        <span class="toggle-copy">
+                          <strong>详细日志</strong>
+                          <small>输出更详细的请求日志</small>
+                        </span>
+                        <span class="switch">
+                          <input name="verbose" type="checkbox">
+                          <span class="switch-ui" aria-hidden="true"></span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-footer field-wide">
+                  <p class="form-note">提交后可在下方查看任务状态、输出文件和运行日志。</p>
+                  <div class="job-actions">
+                    <button class="secondary" type="button" id="clear-view">清空</button>
+                    <button class="primary" type="submit">开始任务</button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <section class="monitor-grid">
+            <div class="monitor-left">
+              <div class="stats-grid">
+                <article class="metric-card">
+                  <span class="metric-label">任务状态</span>
+                  <strong id="job-status-value" class="metric-value">空闲</strong>
+                  <span id="job-status" class="badge muted">空闲</span>
+                </article>
+
+                <article class="metric-card">
+                  <span class="metric-label">输出文件</span>
+                  <strong id="artifact-count" class="metric-value">0 个</strong>
+                  <span id="artifact-meta" class="metric-subtle">等待任务完成后生成</span>
+                </article>
+              </div>
+
+              <article class="artifact-card">
+                <div class="artifact-card-head">
+                  <div>
+                    <span class="metric-label">最近一次任务</span>
+                    <strong id="job-id" class="artifact-title mono subtle">暂无任务</strong>
+                  </div>
+                </div>
+
+                <div id="download-actions" class="download-actions hidden">
+                  <a id="download-bundle" class="download-link" href="#" download>下载 ZIP</a>
+                </div>
+
+                <div id="artifact-list" class="artifact-list hidden"></div>
+
+                <div class="artifact-empty">
+                  <span class="artifact-empty-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 3v12"></path>
+                      <path d="m7 10 5 5 5-5"></path>
+                      <path d="M5 21h14"></path>
+                    </svg>
+                  </span>
+                  <strong id="latest-artifact-name">暂无产物</strong>
+                  <p id="latest-artifact-hint">任务完成后，产物将显示在这里。</p>
+                </div>
+
+                <div id="job-summary" class="summary"></div>
+              </article>
             </div>
-          </div>
-          <div id="job-summary" class="summary"></div>
-          <div id="download-actions" class="download-actions hidden">
-            <a id="download-bundle" class="download-link" href="#" download>Download ZIP Bundle</a>
-            <span id="artifact-meta" class="subtle"></span>
-          </div>
-          <div id="artifact-list" class="artifact-list hidden"></div>
-          <pre id="job-log" class="log-view">等待任务开始…</pre>
-        </section>
-      </main>
+
+            <article class="panel log-panel">
+              <div class="log-head">
+                <div>
+                  <span class="panel-kicker">运行记录</span>
+                  <h2>运行日志</h2>
+                </div>
+                <button class="text-button" type="button" id="clear-log">清空日志</button>
+              </div>
+              <div id="job-log" class="log-view" aria-live="polite"></div>
+            </article>
+          </section>
+        </main>
+      </div>
     </div>
+
     <script src="/static/app.js"></script>
   </body>
-  </html>
+</html>

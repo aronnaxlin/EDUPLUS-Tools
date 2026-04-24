@@ -1,7 +1,9 @@
 const form = document.getElementById("run-form");
+const clearViewButton = document.getElementById("clear-view");
 const clearLogButton = document.getElementById("clear-log");
 const logView = document.getElementById("job-log");
-const jobStatus = document.getElementById("job-status");
+const jobStatusBadge = document.getElementById("job-status");
+const jobStatusValue = document.getElementById("job-status-value");
 const jobId = document.getElementById("job-id");
 const summary = document.getElementById("job-summary");
 const healthBadge = document.getElementById("health-badge");
@@ -9,13 +11,42 @@ const downloadActions = document.getElementById("download-actions");
 const downloadBundle = document.getElementById("download-bundle");
 const artifactMeta = document.getElementById("artifact-meta");
 const artifactList = document.getElementById("artifact-list");
+const artifactCount = document.getElementById("artifact-count");
+const latestArtifactName = document.getElementById("latest-artifact-name");
+const latestArtifactHint = document.getElementById("latest-artifact-hint");
 const executionMode = document.getElementById("execution-mode");
 const modeTitle = document.getElementById("mode-title");
 const modeCopy = document.getElementById("mode-copy");
 const outputLabel = document.getElementById("output-label");
 const outputInput = document.getElementById("output-input");
+const modeToggle = document.querySelector(".mode-toggle");
+const modeButtons = Array.from(document.querySelectorAll(".mode-pill"));
+const themeToggleButton = document.getElementById("theme-toggle");
 
 let pollTimer = null;
+const THEME_STORAGE_KEY = "eduplus-theme";
+const SUMMARY_LABELS = {
+  mode: "运行模式",
+  course_id: "课程 ID",
+  course_name: "课程名称",
+  output: "输出目录",
+  session: "SESSION",
+  artifacts: "输出文件",
+  bundle: "打包结果",
+};
+const ERROR_MESSAGE_MAP = {
+  "Failed to fetch artifacts": "获取输出文件失败",
+  "health check failed": "服务检查失败",
+  "Failed to load config": "读取服务配置失败",
+  "Failed to create job": "提交任务失败",
+  "Failed to fetch job": "获取任务状态失败",
+  "invalid command": "不支持的任务类型",
+  "local output mode is disabled on this server": "当前服务未开启本地输出模式",
+  "job not found": "未找到任务",
+  "job has no downloadable artifacts": "当前任务没有可下载文件",
+  "invalid json body": "请求内容不是有效的 JSON",
+  "json body must be an object": "请求内容必须是 JSON 对象",
+};
 
 function formatBytes(bytes) {
   const value = Number(bytes) || 0;
@@ -28,26 +59,109 @@ function formatBytes(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatCount(count) {
+  return `${count} 个`;
+}
+
+function getCurrentTheme() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function updateThemeToggle() {
+  if (!themeToggleButton) {
+    return;
+  }
+
+  const nextModeLabel = getCurrentTheme() === "dark" ? "切换到浅色模式" : "切换到夜间模式";
+  themeToggleButton.setAttribute("aria-label", nextModeLabel);
+  themeToggleButton.setAttribute("title", nextModeLabel);
+}
+
+function applyTheme(theme, persist = true) {
+  const resolvedTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = resolvedTheme;
+  updateThemeToggle();
+
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, resolvedTheme);
+    } catch (error) {
+      // Ignore localStorage errors and keep the current in-memory theme.
+    }
+  }
+}
+
+function toggleTheme() {
+  applyTheme(getCurrentTheme() === "dark" ? "light" : "dark");
+}
+
 function setBadge(element, text, kind = "muted") {
   element.className = `badge ${kind}`;
   element.textContent = text;
 }
 
+function setJobState(label, kind = "muted", value = label) {
+  setBadge(jobStatusBadge, label, kind);
+  jobStatusValue.textContent = value;
+}
+
+function renderLog(lines = []) {
+  const entries = Array.isArray(lines) && lines.length ? lines : ["等待任务开始...", "当前为公共模式", "任务完成后可下载 ZIP"];
+  logView.replaceChildren();
+  entries.forEach((line, index) => {
+    const row = document.createElement("div");
+    const number = document.createElement("span");
+    const text = document.createElement("span");
+    row.className = "log-line";
+    number.className = "log-line-number";
+    text.className = "log-line-text";
+    number.textContent = String(index + 1);
+    text.textContent = String(line);
+    row.append(number, text);
+    logView.appendChild(row);
+  });
+  logView.scrollTop = logView.scrollHeight;
+}
+
+function humanizeKey(key) {
+  return SUMMARY_LABELS[key] || key.replace(/_/g, " ");
+}
+
+function localizeMessage(message) {
+  const text = String(message || "").trim();
+  return ERROR_MESSAGE_MAP[text] || text;
+}
+
 function renderSummary(data = {}) {
-  const entries = Object.entries(data).filter(([, value]) => value);
+  const entries = Object.entries(data).filter(([, value]) => value !== null && value !== undefined && value !== "");
   summary.replaceChildren();
   if (entries.length === 0) {
-    summary.textContent = "";
+    summary.classList.add("hidden");
     return;
   }
+
+  summary.classList.remove("hidden");
   for (const [key, value] of entries) {
     const row = document.createElement("div");
+    const label = document.createElement("span");
     const strong = document.createElement("strong");
-    strong.textContent = key;
-    row.appendChild(strong);
-    row.append(`: ${String(value)}`);
+    row.className = "summary-row";
+    label.textContent = humanizeKey(key);
+    strong.textContent = localizeMessage(value);
+    row.append(label, strong);
     summary.appendChild(row);
   }
+}
+
+function updateLatestArtifact(file = null, totalBytes = 0) {
+  if (!file) {
+    latestArtifactName.textContent = "暂无产物";
+    latestArtifactHint.textContent = "任务完成后，产物将显示在这里。";
+    return;
+  }
+
+  latestArtifactName.textContent = file.path;
+  latestArtifactHint.textContent = `${formatBytes(file.size)}${totalBytes ? ` · 总计 ${formatBytes(totalBytes)}` : ""}`;
 }
 
 function setBusy(busy) {
@@ -58,39 +172,56 @@ function setBusy(busy) {
       }
     }
   });
+
+  modeButtons.forEach((button) => {
+    button.disabled = busy;
+  });
+
+  clearViewButton.disabled = busy;
 }
 
 function resetArtifacts() {
+  artifactCount.textContent = formatCount(0);
+  artifactMeta.textContent = "等待任务完成后生成";
   downloadActions.classList.add("hidden");
   downloadBundle.removeAttribute("href");
-  artifactMeta.textContent = "";
   artifactList.classList.add("hidden");
   artifactList.replaceChildren();
+  updateLatestArtifact();
 }
 
 function renderArtifacts(data = {}) {
   resetArtifacts();
-  if (!data.artifact_count) {
+
+  const count = Number(data.artifact_count) || 0;
+  artifactCount.textContent = formatCount(count);
+  artifactMeta.textContent = count ? formatBytes(data.total_bytes) : "等待任务完成后生成";
+
+  if (!count) {
     return;
   }
+
+  const files = Array.isArray(data.files) ? data.files : [];
+  const latestFile = files[files.length - 1] || null;
+  updateLatestArtifact(latestFile, data.total_bytes);
 
   if (data.bundle_url) {
     downloadBundle.href = data.bundle_url;
     downloadActions.classList.remove("hidden");
   }
-  artifactMeta.textContent = `${data.artifact_count} files, ${formatBytes(data.total_bytes)}`;
 
   const title = document.createElement("p");
-  title.className = "card-label";
-  title.textContent = "Artifacts";
+  title.className = "metric-label";
+  title.textContent = "输出列表";
+
   const list = document.createElement("ul");
-  for (const file of data.files || []) {
+  files.forEach((file) => {
     const item = document.createElement("li");
     item.textContent = `${file.path} (${formatBytes(file.size)})`;
     list.appendChild(item);
-  }
-  artifactList.appendChild(title);
-  artifactList.appendChild(list);
+  });
+
+  artifactList.append(title, list);
   artifactList.classList.remove("hidden");
 }
 
@@ -98,7 +229,7 @@ async function fetchArtifacts(id) {
   const response = await fetch(`/api/jobs/${id}/artifacts`);
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || "Failed to fetch artifacts");
+    throw new Error(localizeMessage(data.error || "Failed to fetch artifacts"));
   }
   return data;
 }
@@ -109,9 +240,22 @@ async function checkHealth() {
     if (!response.ok) {
       throw new Error("health check failed");
     }
-    setBadge(healthBadge, "Server ready", "success");
+    setBadge(healthBadge, "服务正常", "success");
   } catch {
-    setBadge(healthBadge, "Server unavailable", "failed");
+    setBadge(healthBadge, "服务不可用", "failed");
+  }
+}
+
+function syncModeButtons(mode) {
+  modeButtons.forEach((button) => {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
+  if (modeToggle) {
+    const visibleButtons = modeButtons.filter((button) => !button.classList.contains("is-hidden"));
+    modeToggle.classList.toggle("is-single", visibleButtons.length === 1);
   }
 }
 
@@ -120,7 +264,7 @@ async function loadServerConfig() {
     const response = await fetch("/api/config");
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Failed to load config");
+      throw new Error(localizeMessage(data.error || "Failed to load config"));
     }
 
     if (!data.enable_local_output) {
@@ -128,12 +272,18 @@ async function loadServerConfig() {
       if (localOption) {
         localOption.remove();
       }
+
+      const localButton = modeButtons.find((button) => button.dataset.mode === "local");
+      if (localButton) {
+        localButton.classList.add("is-hidden");
+      }
       executionMode.value = "public";
     }
 
     if (data.public_output_root && executionMode.value === "public") {
       outputInput.value = data.public_output_root;
     }
+
     applyExecutionMode(executionMode.value, data);
   } catch {
     applyExecutionMode(executionMode.value);
@@ -141,10 +291,13 @@ async function loadServerConfig() {
 }
 
 function applyExecutionMode(mode, serverConfig = null) {
+  executionMode.value = mode;
+  syncModeButtons(mode);
+
   if (mode === "local") {
-    modeTitle.textContent = "Local output mode";
-    modeCopy.textContent = "结果直接写入你指定的本地目录，更适合自用部署。仍然保留 ZIP 下载，方便浏览器取回。";
-    outputLabel.textContent = "Output Directory";
+    modeTitle.textContent = "本地输出";
+    modeCopy.textContent = "结果会直接写入你指定的目录，适合自己部署自己使用。";
+    outputLabel.textContent = "输出目录";
     const defaultLocalRoot = serverConfig?.local_output_root || "downloads";
     if (!outputInput.value || outputInput.value === "downloads/web-jobs") {
       outputInput.value = defaultLocalRoot;
@@ -153,9 +306,9 @@ function applyExecutionMode(mode, serverConfig = null) {
     return;
   }
 
-  modeTitle.textContent = "Public service mode";
-  modeCopy.textContent = "每次任务隔离到独立目录，适合公共服务。ZIP 下载完成后，服务端会及时清理公共任务文件。";
-  outputLabel.textContent = "Output Base";
+  modeTitle.textContent = "公共模式";
+  modeCopy.textContent = "每次任务会单独处理，适合在公共环境中使用，ZIP 下载完成后会自动清理公共任务文件。";
+  outputLabel.textContent = "输出目录";
   const defaultPublicRoot = serverConfig?.public_output_root || "downloads/web-jobs";
   if (!outputInput.value || outputInput.value === "downloads") {
     outputInput.value = defaultPublicRoot;
@@ -188,8 +341,9 @@ async function startJob(event) {
   setBusy(true);
   renderSummary({});
   resetArtifacts();
-  logView.textContent = "Submitting job...";
-  setBadge(jobStatus, "Queued", "running");
+  renderLog(["正在提交任务...", "正在检查参数...", `当前模式: ${payload.execution_mode === "local" ? "本地输出" : "公共模式"}`]);
+  setJobState("等待中", "running", "等待中");
+
   try {
     const response = await fetch("/api/run", {
       method: "POST",
@@ -198,49 +352,52 @@ async function startJob(event) {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Failed to create job");
+      throw new Error(localizeMessage(data.error || "Failed to create job"));
     }
-    jobId.textContent = `Job ${data.job_id}`;
+
+    jobId.textContent = `任务 ${data.job_id}`;
     pollJob(data.job_id);
   } catch (error) {
-    logView.textContent = String(error);
-    setBadge(jobStatus, "Failed", "failed");
+    renderLog([localizeMessage(error instanceof Error ? error.message : String(error))]);
+    setJobState("失败", "failed", "失败");
     setBusy(false);
   }
 }
 
 async function pollJob(id) {
   clearInterval(pollTimer);
+
   const tick = async () => {
     try {
       const response = await fetch(`/api/jobs/${id}`);
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch job");
+        throw new Error(localizeMessage(data.error || "Failed to fetch job"));
       }
 
       renderSummary(data.summary);
-      logView.textContent = data.logs.length ? data.logs.join("\n") : "Running...";
-      logView.scrollTop = logView.scrollHeight;
+      renderLog(data.logs);
 
       const status = data.status;
       if (status === "completed") {
-        setBadge(jobStatus, `Completed (${data.exit_code})`, data.exit_code === 0 ? "success" : "failed");
+        setJobState(data.exit_code === 0 ? "已完成" : "已完成（有错误）", data.exit_code === 0 ? "success" : "failed", data.exit_code === 0 ? "完成" : "检查日志");
         renderArtifacts(await fetchArtifacts(id));
         clearInterval(pollTimer);
         setBusy(false);
         return;
       }
+
       if (status === "failed") {
-        setBadge(jobStatus, `Failed (${data.exit_code ?? 1})`, "failed");
+        setJobState("失败", "failed", "失败");
         clearInterval(pollTimer);
         setBusy(false);
         return;
       }
-      setBadge(jobStatus, status === "running" ? "Running" : "Queued", "running");
+
+      setJobState(status === "running" ? "运行中" : "等待中", "running", status === "running" ? "运行中" : "等待中");
     } catch (error) {
-      setBadge(jobStatus, "Polling failed", "failed");
-      logView.textContent += `\n${String(error)}`;
+      setJobState("轮询失败", "failed", "错误");
+      renderLog([`获取任务状态失败：${localizeMessage(error instanceof Error ? error.message : String(error))}`]);
       clearInterval(pollTimer);
       setBusy(false);
     }
@@ -250,19 +407,38 @@ async function pollJob(id) {
   pollTimer = setInterval(tick, 1200);
 }
 
-form.addEventListener("submit", startJob);
-clearLogButton.addEventListener("click", () => {
+function resetView() {
+  clearInterval(pollTimer);
   renderSummary({});
   resetArtifacts();
-  jobId.textContent = "No job yet";
-  setBadge(jobStatus, "Idle", "muted");
-  logView.textContent = "等待任务开始…";
+  jobId.textContent = "暂无任务";
+  setJobState("空闲", "muted", "空闲");
+  renderLog();
+}
+
+function clearLog() {
+  renderLog(["日志已清空"]);
+}
+
+form.addEventListener("submit", startJob);
+clearViewButton.addEventListener("click", resetView);
+clearLogButton.addEventListener("click", clearLog);
+if (themeToggleButton) {
+  themeToggleButton.addEventListener("click", toggleTheme);
+}
+
+modeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button.disabled || button.classList.contains("is-hidden")) {
+      return;
+    }
+    applyExecutionMode(button.dataset.mode);
+  });
 });
 
-executionMode.addEventListener("change", () => {
-  applyExecutionMode(executionMode.value);
-});
-
+renderLog();
+resetArtifacts();
+updateThemeToggle();
 applyExecutionMode(executionMode.value);
 loadServerConfig();
 checkHealth();

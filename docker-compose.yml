@@ -2,17 +2,25 @@ services:
   eduplus-web:
     build: .
     container_name: eduplus-web
+    init: true
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
+      HOST: 0.0.0.0
       PORT: 8000
-      EDUPLUS_ENABLE_LOCAL_OUTPUT: "false"
-      EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS: "true"
-      EDUPLUS_PUBLIC_JOB_TTL_SECONDS: 1800
-      EDUPLUS_CLEANUP_INTERVAL_SECONDS: 60
-      EDUPLUS_PUBLIC_OUTPUT_ROOT: downloads/web-jobs
-      EDUPLUS_BUNDLE_ROOT: downloads/web-bundles
-      EDUPLUS_LOCAL_OUTPUT_ROOT: downloads
+      EDUPLUS_ENABLE_LOCAL_OUTPUT: ${EDUPLUS_ENABLE_LOCAL_OUTPUT:-false}
+      EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS: ${EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS:-true}
+      EDUPLUS_PUBLIC_JOB_TTL_SECONDS: ${EDUPLUS_PUBLIC_JOB_TTL_SECONDS:-1800}
+      EDUPLUS_CLEANUP_INTERVAL_SECONDS: ${EDUPLUS_CLEANUP_INTERVAL_SECONDS:-60}
+      EDUPLUS_PUBLIC_OUTPUT_ROOT: ${EDUPLUS_PUBLIC_OUTPUT_ROOT:-downloads/web-jobs}
+      EDUPLUS_BUNDLE_ROOT: ${EDUPLUS_BUNDLE_ROOT:-downloads/web-bundles}
+      EDUPLUS_LOCAL_OUTPUT_ROOT: ${EDUPLUS_LOCAL_OUTPUT_ROOT:-downloads}
     volumes:
       - ./downloads:/app/downloads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, urllib.request; port=os.getenv('PORT', '8000'); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=3); sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
