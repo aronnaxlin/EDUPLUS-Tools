@@ -191,9 +191,10 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
     try:
         execution_mode = normalize_execution_mode(payload.get("execution_mode"))
         output_root = _job_output_root(payload, job_id)
+        requested_session = _string(payload.get("session"))
         config = load_config(
-            config_file=None,
-            session=_string(payload.get("session")),
+            config_file="config.json" if execution_mode == "local" else None,
+            session=requested_session or None,
             course_id=_string(payload.get("course_id")),
             hm_lvt=_string(payload.get("hm_lvt")),
             course_name=_string(payload.get("course_name")),
@@ -203,6 +204,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
         )
         client = EduplusClient(config, verbose=bool(payload.get("verbose")), log=log)
         output_root = Path(config.output)
+        session_source = "当前填写" if requested_session else ("服务端配置" if execution_mode == "local" else "当前填写")
 
         job_store.update(
             job_id,
@@ -213,10 +215,12 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                 "course_id": config.course_id,
                 "course_name": config.course_name,
                 "output": str(output_root),
+                "session_source": session_source,
                 "session": mask_value(config.session),
             },
         )
         log(f"课程 ID：{config.course_id}")
+        log(f"SESSION 来源：{session_source}")
         log(f"SESSION: {mask_value(config.session)}")
         log(f"输出目录：{output_root}")
 
@@ -256,6 +260,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
         summary = {
             "mode": execution_mode_label(execution_mode),
             **config_summary(config, output_root),
+            "session_source": session_source,
             "artifacts": str(artifacts["artifact_count"]),
             "bundle": "可下载" if artifacts["artifact_count"] else "无文件",
         }

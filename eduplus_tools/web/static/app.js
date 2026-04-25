@@ -19,17 +19,23 @@ const modeTitle = document.getElementById("mode-title");
 const modeCopy = document.getElementById("mode-copy");
 const outputLabel = document.getElementById("output-label");
 const outputInput = document.getElementById("output-input");
+const sessionInput = form.querySelector('input[name="session"]');
+const sessionLabel = document.getElementById("session-label");
+const sessionHint = document.getElementById("session-hint");
+const sessionSourceBadge = document.getElementById("session-source-badge");
 const modeToggle = document.querySelector(".mode-toggle");
 const modeButtons = Array.from(document.querySelectorAll(".mode-pill"));
 const themeToggleButton = document.getElementById("theme-toggle");
 
 let pollTimer = null;
+let currentServerConfig = null;
 const THEME_STORAGE_KEY = "eduplus-theme";
 const SUMMARY_LABELS = {
   mode: "运行模式",
   course_id: "课程 ID",
   course_name: "课程名称",
   output: "输出目录",
+  session_source: "SESSION 来源",
   session: "SESSION",
   artifacts: "输出文件",
   bundle: "打包结果",
@@ -284,6 +290,7 @@ async function loadServerConfig() {
       outputInput.value = data.public_output_root;
     }
 
+    currentServerConfig = data;
     applyExecutionMode(executionMode.value, data);
   } catch {
     applyExecutionMode(executionMode.value);
@@ -291,29 +298,49 @@ async function loadServerConfig() {
 }
 
 function applyExecutionMode(mode, serverConfig = null) {
+  currentServerConfig = serverConfig || currentServerConfig;
   executionMode.value = mode;
   syncModeButtons(mode);
+  const hasServerSession = Boolean(currentServerConfig?.has_server_session);
 
   if (mode === "local") {
     modeTitle.textContent = "本地输出";
-    modeCopy.textContent = "结果会直接写入你指定的目录，适合自己部署自己使用。";
+    modeCopy.textContent = hasServerSession
+      ? "结果会直接写入你指定的目录，可留空 SESSION 并使用服务端配置，适合自己部署自己使用。"
+      : "结果会直接写入你指定的目录，适合自己部署自己使用。";
     outputLabel.textContent = "输出目录";
-    const defaultLocalRoot = serverConfig?.local_output_root || "downloads";
+    const defaultLocalRoot = currentServerConfig?.local_output_root || "downloads";
     if (!outputInput.value || outputInput.value === "downloads/web-jobs") {
       outputInput.value = defaultLocalRoot;
     }
     outputInput.placeholder = `直接写入的本地目录，例如 ${defaultLocalRoot}`;
+    sessionLabel.textContent = hasServerSession ? "SESSION（可留空）" : "SESSION";
+    sessionInput.required = !hasServerSession;
+    sessionInput.placeholder = hasServerSession
+      ? "可留空，留空时使用服务端 config.json 中的 SESSION"
+      : "当前服务未配置默认 SESSION，请手动填写";
+    sessionSourceBadge.textContent = hasServerSession ? "可用服务端配置" : "需要手动填写";
+    sessionSourceBadge.dataset.kind = hasServerSession ? "server" : "manual";
+    sessionHint.textContent = hasServerSession
+      ? "仅适合自己部署自己使用。留空时会改用服务端配置中的 SESSION，不会展示原值。"
+      : "当前服务端没有默认 SESSION，本地输出模式下仍需要你手动填写。";
     return;
   }
 
   modeTitle.textContent = "公共模式";
-  modeCopy.textContent = "每次任务会单独处理，适合在公共环境中使用，ZIP 下载完成后会自动清理公共任务文件。";
+  modeCopy.textContent = "每次任务会单独处理，适合在公共环境中使用。需要填写你自己的 SESSION，ZIP 下载完成后会自动清理公共任务文件。";
   outputLabel.textContent = "输出目录";
-  const defaultPublicRoot = serverConfig?.public_output_root || "downloads/web-jobs";
+  const defaultPublicRoot = currentServerConfig?.public_output_root || "downloads/web-jobs";
   if (!outputInput.value || outputInput.value === "downloads") {
     outputInput.value = defaultPublicRoot;
   }
   outputInput.placeholder = `任务隔离目录根，例如 ${defaultPublicRoot}`;
+  sessionLabel.textContent = "SESSION（必填）";
+  sessionInput.required = true;
+  sessionInput.placeholder = "公共模式下请填写你自己的 EDUPLUS SESSION";
+  sessionSourceBadge.textContent = "用户填写";
+  sessionSourceBadge.dataset.kind = "manual";
+  sessionHint.textContent = "公共模式不会读取服务端默认 SESSION。你填写的 SESSION 仅用于当前任务，不会写入服务端配置。";
 }
 
 function collectPayload() {
@@ -411,6 +438,7 @@ function resetView() {
   clearInterval(pollTimer);
   renderSummary({});
   resetArtifacts();
+  applyExecutionMode(executionMode.value);
   jobId.textContent = "暂无任务";
   setJobState("空闲", "muted", "空闲");
   renderLog();

@@ -156,6 +156,39 @@ def load_config(
     return config
 
 
+def inspect_config_defaults(config_file: str | Path = "config.json") -> dict[str, Any]:
+    try:
+        file_config, resolved_config_path = load_json_config_file(config_file)
+    except SystemExit:
+        return {
+            "config_path": "",
+            "has_session": False,
+            "has_course_id": False,
+        }
+
+    cookies = file_config.get("cookies", {})
+    if not isinstance(cookies, dict):
+        cookies = {}
+
+    has_session = bool(
+        first_value(
+            file_config.get("session"),
+            cookies.get("SESSION"),
+        )
+    )
+    has_course_id = bool(
+        first_value(
+            file_config.get("course_id"),
+            file_config.get("courseId"),
+        )
+    )
+    return {
+        "config_path": str(resolved_config_path) if resolved_config_path and resolved_config_path.exists() else "",
+        "has_session": has_session,
+        "has_course_id": has_course_id,
+    }
+
+
 def mask_value(value: str, visible: int = 6) -> str:
     if not value:
         return "(empty)"

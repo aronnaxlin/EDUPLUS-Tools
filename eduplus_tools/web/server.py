@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
+from ..core.config import inspect_config_defaults
 from .jobs import JobStore, build_job_bundle, cleanup_job_artifacts, cleanup_job_bundle, configure_storage, list_job_artifacts, run_job_async, serialize_job
 
 
@@ -87,11 +88,14 @@ class WebHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True})
             return
         if parsed.path == "/api/config":
+            config_defaults = inspect_config_defaults()
             self._send_json(
                 {
                     "enable_local_output": SERVER_CONFIG.enable_local_output if SERVER_CONFIG else False,
                     "public_output_root": str(SERVER_CONFIG.public_output_root) if SERVER_CONFIG else "downloads/web-jobs",
                     "local_output_root": str(SERVER_CONFIG.local_output_root) if SERVER_CONFIG else "downloads",
+                    "has_server_session": bool(config_defaults.get("has_session")),
+                    "config_path": str(config_defaults.get("config_path") or ""),
                 }
             )
             return

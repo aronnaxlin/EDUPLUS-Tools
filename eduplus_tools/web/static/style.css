@@ -495,6 +495,46 @@ html[data-theme="dark"] .theme-icon-moon {
   font-size: 14px;
 }
 
+.field-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.field-note p {
+  margin: 0;
+  color: var(--muted-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.inline-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.inline-badge[data-kind="manual"] {
+  color: var(--accent-strong);
+  border-color: rgba(204, 98, 55, 0.16);
+  background: rgba(204, 98, 55, 0.08);
+}
+
+.inline-badge[data-kind="server"] {
+  color: var(--success);
+  border-color: rgba(47, 138, 77, 0.18);
+  background: rgba(47, 138, 77, 0.1);
+}
+
 .job-form-grid,
 .advanced-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
