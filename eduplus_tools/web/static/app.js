@@ -111,8 +111,17 @@ function setJobState(label, kind = "muted", value = label) {
   jobStatusValue.textContent = value;
 }
 
+function normalizeLogEntries(lines = []) {
+  const fallback = ["等待任务开始...", "当前为公共模式", "任务完成后可下载 ZIP"];
+  const source = Array.isArray(lines) && lines.length ? lines : fallback;
+  return source.flatMap((line) => {
+    const parts = String(line).split(/\r\n|\r|\n/);
+    return parts.length ? parts : [""];
+  });
+}
+
 function renderLog(lines = []) {
-  const entries = Array.isArray(lines) && lines.length ? lines : ["等待任务开始...", "当前为公共模式", "任务完成后可下载 ZIP"];
+  const entries = normalizeLogEntries(lines);
   logView.replaceChildren();
   entries.forEach((line, index) => {
     const row = document.createElement("div");
@@ -223,7 +232,13 @@ function renderArtifacts(data = {}) {
   const list = document.createElement("ul");
   files.forEach((file) => {
     const item = document.createElement("li");
-    item.textContent = `${file.path} (${formatBytes(file.size)})`;
+    const name = document.createElement("span");
+    const size = document.createElement("span");
+    name.className = "artifact-file-name";
+    size.className = "artifact-file-size";
+    name.textContent = file.path;
+    size.textContent = formatBytes(file.size);
+    item.append(name, size);
     list.appendChild(item);
   });
 

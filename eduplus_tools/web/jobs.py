@@ -60,10 +60,11 @@ class JobStore:
             return self._jobs.get(job_id)
 
     def append_log(self, job_id: str, message: str) -> None:
+        lines = str(message).splitlines() or [""]
         with self._lock:
             job = self._jobs.get(job_id)
             if job is not None:
-                job.logs.append(message)
+                job.logs.extend(lines)
 
     def update(self, job_id: str, **changes: object) -> None:
         with self._lock:
