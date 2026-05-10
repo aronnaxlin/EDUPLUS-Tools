@@ -14,12 +14,38 @@ from ..core.client import EduplusClient
 from ..core.config import safe_filename
 
 
-def clean_html(text: Any) -> str:
+def html_to_md(text: Any) -> str:
+    """Convert HTML question/option content to Markdown."""
     if text is None:
         return ""
     text = unescape(str(text))
+    text = re.sub(r"<br\s*/?>", "  \n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r'<img[^>]*src=["\']([^"\']+)["\'][^>]*>',
+        lambda m: f"\n![图片]({m.group(1)})\n",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<img[^>]*>", "\n![图片]()\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def clean_html(text: Any) -> str:
+    """Strip HTML to plain text (used for answer formatting)."""
+    if text is None:
+        return ""
+    text = unescape(str(text))
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r'<img[^>]*src=["\']([^"\']+)["\'][^>]*>', "[图片]", text, flags=re.IGNORECASE)
+    text = re.sub(r"<img[^>]*>", "[图片]", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
 
 
@@ -162,59 +188,65 @@ def get_question_type_label(qsn_type: Any) -> str | None:
     return {1: "单选题", 2: "多选题", 3: "判断题", 6: "填空题"}.get(qsn_type)
 
 
-def write_text_output(data: dict[str, Any], text_path: Path, include_answers: bool = False) -> None:
-    text_path.parent.mkdir(parents=True, exist_ok=True)
-    with text_path.open("w", encoding="utf-8") as out_f:
+def write_md_output(data: dict[str, Any], md_path: Path, include_answers: bool = False) -> None:
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    with md_path.open("w", encoding="utf-8") as f:
         homework_name = data.get("homework_name", "未知作业")
-        out_f.write(f"作业名称: {homework_name}\n")
-        out_f.write(f"题目数量: {data.get('question_count', 0)}\n")
-        out_f.write(f"导出时间: {data.get('timestamp', '')}\n")
+        f.write(f"# {homework_name}\n\n")
+        f.write(f"**题目数量：** {data.get('question_count', 0)}  \n")
+        f.write(f"**导出时间：** {data.get('timestamp', '')}  \n")
         if include_answers:
-            out_f.write("导出类型: 带答案版本\n")
-        out_f.write("=" * 60 + "\n\n")
+            f.write("**导出类型：** 带答案版本  \n")
+        f.write("\n---\n\n")
 
         for idx, question in enumerate(data.get("questions", [])):
             detail = question.get("detail", {})
             qsn_type = detail.get("qsnType")
-            title = clean_html(detail.get("titleText", ""))
+            title = html_to_md(detail.get("titleText", ""))
             question_type_label = get_question_type_label(qsn_type)
 
-            out_f.write(f"题目 {idx + 1}: {title}\n")
+            heading = f"题目 {idx + 1}"
             if question_type_label:
-                out_f.write(f"  ({question_type_label})\n")
+                heading += f"（{question_type_label}）"
+            f.write(f"## {heading}\n\n")
+            f.write(f"{title}\n\n")
 
             if qsn_type in [1, 2]:
                 for opt_idx, opt in enumerate(detail.get("options", [])):
-                    content = clean_html(opt.get("optionContent", ""))
-                    out_f.write(f"  {chr(65 + opt_idx)}. {content}\n")
+                    content = html_to_md(opt.get("optionContent", ""))
+                    f.write(f"- {chr(65 + opt_idx)}. {content}\n")
+                f.write("\n")
             elif qsn_type not in [3, 6]:
-                out_f.write(f"  (未知题型: {qsn_type})\n")
+                f.write(f"*(未知题型: {qsn_type})*\n\n")
 
             if include_answers:
                 user_answer = detail.get("userAnswer")
-                out_f.write(f"  用户答案: {format_answer_value(detail, user_answer) if user_answer not in (None, '') else '(未作答)'}\n")
+                user_ans_str = format_answer_value(detail, user_answer) if user_answer not in (None, "") else "*(未作答)*"
+                f.write(f"> **用户答案：** {user_ans_str}  \n")
                 correct_answer = detail.get("answer")
                 if correct_answer not in (None, ""):
-                    out_f.write(f"  正确答案: {format_answer_value(detail, correct_answer)}\n")
+                    f.write(f"> **正确答案：** {format_answer_value(detail, correct_answer)}  \n")
                 if "isCorrect" in detail:
-                    out_f.write(f"  判题结果: {'正确' if detail.get('isCorrect') == 1 else '错误'}\n")
+                    result = "✓ 正确" if detail.get("isCorrect") == 1 else "✗ 错误"
+                    f.write(f"> **判题结果：** {result}  \n")
                 score = detail.get("userScore", question.get("userScore"))
                 if score is not None:
-                    out_f.write(f"  得分: {score}\n")
+                    f.write(f"> **得分：** {score}  \n")
+                f.write("\n")
 
-            out_f.write("\n")
+            f.write("---\n\n")
 
 
-def convert_to_text(json_path: Path, output_dir: Path, log: Callable[[str], None] = print) -> Path | None:
+def convert_to_md(json_path: Path, output_dir: Path, log: Callable[[str], None] = print) -> Path | None:
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
         base_name = json_path.stem
-        plain_path = output_dir / "不带答案" / f"{base_name}.txt"
-        answer_path = output_dir / "带答案" / f"{base_name}_带答案.txt"
-        write_text_output(data, plain_path, include_answers=False)
-        write_text_output(data, answer_path, include_answers=True)
-        log(f"已生成文本文件：{plain_path}")
-        log(f"已生成带答案文本：{answer_path}")
+        plain_path = output_dir / "不带答案" / f"{base_name}.md"
+        answer_path = output_dir / "带答案" / f"{base_name}_带答案.md"
+        write_md_output(data, plain_path, include_answers=False)
+        write_md_output(data, answer_path, include_answers=True)
+        log(f"已生成 Markdown：{plain_path}")
+        log(f"已生成带答案 Markdown：{answer_path}")
         return plain_path
     except Exception as exc:
         log(f"转换失败：{json_path}：{exc}")
@@ -230,9 +262,9 @@ def scrape_homework(
     log: Callable[[str], None] = print,
 ) -> int:
     json_dir = output_root / "homework" / "json"
-    text_dir = output_root / "homework" / "text"
+    md_dir = output_root / "homework" / "markdown"
     json_dir.mkdir(parents=True, exist_ok=True)
-    text_dir.mkdir(parents=True, exist_ok=True)
+    md_dir.mkdir(parents=True, exist_ok=True)
 
     homeworks = get_homework_list(client, course_id, log=log)
     if not homeworks:
@@ -249,17 +281,17 @@ def scrape_homework(
             log(f"已保存 JSON：{json_path}")
         time.sleep(1)
 
-    log("\n正在把 JSON 转成文本...")
+    log("\n正在把 JSON 转成 Markdown...")
     for json_file in json_files:
-        convert_to_text(json_file, text_dir, log=log)
+        convert_to_md(json_file, md_dir, log=log)
 
     if convert_existing:
         for json_file in json_dir.glob("*.json"):
             if json_file not in json_files:
                 log(f"正在转换已有文件：{json_file.name}")
-                convert_to_text(json_file, text_dir, log=log)
+                convert_to_md(json_file, md_dir, log=log)
 
     log("\n处理完成。")
     log(f"JSON 目录：{json_dir}")
-    log(f"文本目录：{text_dir}")
+    log(f"Markdown 目录：{md_dir}")
     return 0
