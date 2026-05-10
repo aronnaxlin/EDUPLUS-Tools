@@ -370,6 +370,7 @@ function collectPayload() {
     output: formData.get("output"),
     base_url: formData.get("base_url"),
     timeout: formData.get("timeout"),
+    homework_answer_mode: formData.get("homework_answer_mode"),
     dry_run: formData.get("dry_run") === "on",
     overwrite: formData.get("overwrite") === "on",
     skip_existing_homework_convert: formData.get("skip_existing_homework_convert") === "on",

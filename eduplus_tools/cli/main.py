@@ -23,6 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=None, help="HTTP timeout seconds")
     parser.add_argument("--dry-run", action="store_true", help="For ppt: list files and signed URLs without downloading")
     parser.add_argument("--overwrite", action="store_true", help="For ppt: overwrite existing files")
+    parser.add_argument(
+        "--homework-answer-mode",
+        choices=["plain", "answers", "both"],
+        default="plain",
+        help="For homework Markdown: plain=no answers, answers=with answers, both=generate both. Default: plain",
+    )
     parser.add_argument("--skip-existing-homework-convert", action="store_true", help="Only convert homework JSON fetched in this run")
     parser.add_argument("--verbose", action="store_true", help="Print extra request details")
     return parser
@@ -77,6 +83,7 @@ def main() -> int:
                 course_id=config.course_id,
                 output_root=output_root,
                 convert_existing=not args.skip_existing_homework_convert,
+                answer_mode=args.homework_answer_mode,
             ),
         )
     elif args.command == "all" and args.dry_run:

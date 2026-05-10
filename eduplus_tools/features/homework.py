@@ -8,10 +8,69 @@ from collections.abc import Callable
 from datetime import datetime
 from html import unescape
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ..core.client import EduplusClient
 from ..core.config import safe_filename
+
+HomeworkAnswerMode = Literal["plain", "answers", "both"]
+
+
+def normalize_answer_mode(value: str | None) -> HomeworkAnswerMode:
+    mode = (value or "plain").strip().lower()
+    aliases = {
+        "no": "plain",
+        "none": "plain",
+        "without": "plain",
+        "without-answers": "plain",
+        "plain": "plain",
+        "with": "answers",
+        "answer": "answers",
+        "answers": "answers",
+        "with-answers": "answers",
+        "all": "both",
+        "both": "both",
+    }
+    resolved = aliases.get(mode)
+    if resolved not in {"plain", "answers", "both"}:
+        raise ValueError(f"Unsupported homework answer mode: {value}")
+    return resolved  # type: ignore[return-value]
+
+
+def is_done_folder(is_done: bool) -> str:
+    return "做过" if is_done else "没做过"
+
+
+ANSWER_RELATED_KEYS = {"answer", "userAnswer", "isCorrect", "userScore", "hwAnswerId"}
+
+
+def strip_answer_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: strip_answer_fields(item) for key, item in value.items() if key not in ANSWER_RELATED_KEYS}
+    if isinstance(value, list):
+        return [strip_answer_fields(item) for item in value]
+    return value
+
+
+def infer_homework_done(item: dict[str, Any]) -> bool:
+    submit_task = item.get("submitTask")
+    if submit_task is not None:
+        return str(submit_task) == "1"
+
+    homework = item.get("homeworkDTO", {})
+    if not isinstance(homework, dict):
+        return False
+    if homework.get("userScore") is not None:
+        return True
+    sub_status = homework.get("subStatus")
+    return str(sub_status) in {"1", "2", "3"}
+
+
+def infer_questions_done(questions: list[dict[str, Any]], fallback: bool) -> bool:
+    answer_values = [question.get("isAnswer") for question in questions if question.get("isAnswer") is not None]
+    if not answer_values:
+        return fallback
+    return all(str(value) == "1" for value in answer_values)
 
 
 def html_to_md(text: Any) -> str:
@@ -58,12 +117,43 @@ def get_homework_list(client: EduplusClient, course_id: str, log: Callable[[str]
 
     homework_items = []
     for item in data["data"]:
+        if not isinstance(item, dict):
+            continue
         homework = item.get("homeworkDTO", {})
+        if not isinstance(homework, dict):
+            continue
         if "id" in homework and "name" in homework:
-            homework_items.append({"sequence": item.get("sequence", 0), "name": homework["name"], "id": homework["id"]})
+            is_done = infer_homework_done(item)
+            homework_items.append(
+                {
+                    "sequence": item.get("sequence", 0),
+                    "name": homework["name"],
+                    "id": homework["id"],
+                    "is_done": is_done,
+                    "status_folder": is_done_folder(is_done),
+                    "submitTask": item.get("submitTask"),
+                    "status": homework.get("status"),
+                    "subStatus": homework.get("subStatus"),
+                    "userScore": homework.get("userScore"),
+                    "totalScore": homework.get("totalScore"),
+                }
+            )
 
     homework_items.sort(key=lambda x: x["sequence"])
-    return [{"name": item["name"], "id": item["id"]} for item in homework_items]
+    return [
+        {
+            "name": item["name"],
+            "id": item["id"],
+            "is_done": item["is_done"],
+            "status_folder": item["status_folder"],
+            "submitTask": item.get("submitTask"),
+            "status": item.get("status"),
+            "subStatus": item.get("subStatus"),
+            "userScore": item.get("userScore"),
+            "totalScore": item.get("totalScore"),
+        }
+        for item in homework_items
+    ]
 
 
 def get_question_detail(client: EduplusClient, question_id: str, log: Callable[[str], None] = print) -> dict[str, Any] | None:
@@ -107,28 +197,43 @@ def process_homework(
     client: EduplusClient,
     homework: dict[str, Any],
     output_dir: Path,
+    *,
+    include_answers_json: bool,
     log: Callable[[str], None] = print,
 ) -> Path | None:
     homework_name = str(homework["name"])
     homework_id = str(homework["id"])
+    is_done = bool(homework.get("is_done"))
     safe_name = safe_filename(homework_name, "homework")
     questions = get_sorted_questions(client, homework_id, log=log)
     if not questions:
         log(f"无法获取《{homework_name}》的题目详情。")
         return None
+    is_done = infer_questions_done(questions, is_done)
+    status_folder = is_done_folder(is_done)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = output_dir / f"作业_{safe_name}_{timestamp}.json"
+    json_path = output_dir / status_folder / f"作业_{safe_name}_{timestamp}.json"
     json_path.parent.mkdir(parents=True, exist_ok=True)
+    homework_data = {
+        "homework_name": homework_name,
+        "homework_id": homework_id,
+        "is_done": is_done,
+        "status_folder": status_folder,
+        "submitTask": homework.get("submitTask"),
+        "status": homework.get("status"),
+        "subStatus": homework.get("subStatus"),
+        "userScore": homework.get("userScore"),
+        "totalScore": homework.get("totalScore"),
+        "timestamp": datetime.now().isoformat(),
+        "question_count": len(questions),
+        "questions": questions,
+    }
+    if not include_answers_json:
+        homework_data = strip_answer_fields(homework_data)
     json_path.write_text(
         json.dumps(
-            {
-                "homework_name": homework_name,
-                "homework_id": homework_id,
-                "timestamp": datetime.now().isoformat(),
-                "question_count": len(questions),
-                "questions": questions,
-            },
+            homework_data,
             ensure_ascii=False,
             indent=2,
         ),
@@ -194,6 +299,8 @@ def write_md_output(data: dict[str, Any], md_path: Path, include_answers: bool =
         homework_name = data.get("homework_name", "未知作业")
         f.write(f"# {homework_name}\n\n")
         f.write(f"**题目数量：** {data.get('question_count', 0)}  \n")
+        if "is_done" in data:
+            f.write(f"**作答状态：** {is_done_folder(bool(data.get('is_done')))}  \n")
         f.write(f"**导出时间：** {data.get('timestamp', '')}  \n")
         if include_answers:
             f.write("**导出类型：** 带答案版本  \n")
@@ -227,7 +334,7 @@ def write_md_output(data: dict[str, Any], md_path: Path, include_answers: bool =
                 if correct_answer not in (None, ""):
                     f.write(f"> **正确答案：** {format_answer_value(detail, correct_answer)}  \n")
                 if "isCorrect" in detail:
-                    result = "✓ 正确" if detail.get("isCorrect") == 1 else "✗ 错误"
+                    result = "正确" if detail.get("isCorrect") == 1 else "错误"
                     f.write(f"> **判题结果：** {result}  \n")
                 score = detail.get("userScore", question.get("userScore"))
                 if score is not None:
@@ -237,20 +344,51 @@ def write_md_output(data: dict[str, Any], md_path: Path, include_answers: bool =
             f.write("---\n\n")
 
 
-def convert_to_md(json_path: Path, output_dir: Path, log: Callable[[str], None] = print) -> Path | None:
+def infer_json_status_folder(data: dict[str, Any]) -> str:
+    if "status_folder" in data:
+        folder = str(data.get("status_folder") or "")
+        if folder in {"做过", "没做过"}:
+            return folder
+    if "is_done" in data:
+        return is_done_folder(bool(data.get("is_done")))
+
+    questions = data.get("questions", [])
+    if isinstance(questions, list) and questions:
+        answer_values = [question.get("isAnswer") for question in questions if isinstance(question, dict)]
+        if answer_values:
+            return is_done_folder(all(str(value) == "1" for value in answer_values))
+    return "没做过"
+
+
+def convert_to_md(
+    json_path: Path,
+    output_dir: Path,
+    *,
+    answer_mode: HomeworkAnswerMode = "plain",
+    log: Callable[[str], None] = print,
+) -> list[Path]:
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
         base_name = json_path.stem
-        plain_path = output_dir / "不带答案" / f"{base_name}.md"
-        answer_path = output_dir / "带答案" / f"{base_name}_带答案.md"
-        write_md_output(data, plain_path, include_answers=False)
-        write_md_output(data, answer_path, include_answers=True)
-        log(f"已生成 Markdown：{plain_path}")
-        log(f"已生成带答案 Markdown：{answer_path}")
-        return plain_path
+        status_folder = infer_json_status_folder(data)
+        generated_paths = []
+
+        if answer_mode in {"plain", "both"}:
+            plain_path = output_dir / status_folder / f"{base_name}.md"
+            write_md_output(data, plain_path, include_answers=False)
+            generated_paths.append(plain_path)
+            log(f"已生成不带答案 Markdown：{plain_path}")
+
+        if answer_mode in {"answers", "both"}:
+            answer_path = output_dir / status_folder / f"{base_name}_带答案.md"
+            write_md_output(data, answer_path, include_answers=True)
+            generated_paths.append(answer_path)
+            log(f"已生成带答案 Markdown：{answer_path}")
+
+        return generated_paths
     except Exception as exc:
         log(f"转换失败：{json_path}：{exc}")
-        return None
+        return []
 
 
 def scrape_homework(
@@ -259,23 +397,32 @@ def scrape_homework(
     course_id: str,
     output_root: Path,
     convert_existing: bool = True,
+    answer_mode: HomeworkAnswerMode = "plain",
     log: Callable[[str], None] = print,
 ) -> int:
+    answer_mode = normalize_answer_mode(answer_mode)
     json_dir = output_root / "homework" / "json"
     md_dir = output_root / "homework" / "markdown"
     json_dir.mkdir(parents=True, exist_ok=True)
     md_dir.mkdir(parents=True, exist_ok=True)
+    for status_folder in ("做过", "没做过"):
+        (json_dir / status_folder).mkdir(parents=True, exist_ok=True)
+        (md_dir / status_folder).mkdir(parents=True, exist_ok=True)
 
     homeworks = get_homework_list(client, course_id, log=log)
     if not homeworks:
         log("未找到作业，请检查 SESSION、课程 ID 或网络。")
         return 1
 
-    log(f"找到 {len(homeworks)} 份作业。")
+    answer_mode_label = {"plain": "不带答案", "answers": "带答案", "both": "两者都要"}[answer_mode]
+    log(f"作业答案导出：{answer_mode_label}")
+    done_count = sum(1 for homework in homeworks if homework.get("is_done"))
+    undone_count = len(homeworks) - done_count
+    log(f"找到 {len(homeworks)} 份作业：做过 {done_count} 份，没做过 {undone_count} 份。")
     json_files = []
     for homework in homeworks:
-        log(f"\n正在处理作业：{homework['name']}")
-        json_path = process_homework(client, homework, json_dir, log=log)
+        log(f"\n正在处理作业：{homework['name']}（{homework.get('status_folder')}）")
+        json_path = process_homework(client, homework, json_dir, include_answers_json=answer_mode in {"answers", "both"}, log=log)
         if json_path:
             json_files.append(json_path)
             log(f"已保存 JSON：{json_path}")
@@ -283,13 +430,13 @@ def scrape_homework(
 
     log("\n正在把 JSON 转成 Markdown...")
     for json_file in json_files:
-        convert_to_md(json_file, md_dir, log=log)
+        convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log)
 
     if convert_existing:
-        for json_file in json_dir.glob("*.json"):
+        for json_file in json_dir.rglob("*.json"):
             if json_file not in json_files:
                 log(f"正在转换已有文件：{json_file.name}")
-                convert_to_md(json_file, md_dir, log=log)
+                convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log)
 
     log("\n处理完成。")
     log(f"JSON 目录：{json_dir}")

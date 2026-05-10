@@ -23,10 +23,12 @@ config.example.json  # 配置模板
 downloads/
   courseware/        # PPT/PPTX 输出
   homework/
-    json/            # 作业原始 JSON
-    text/
-      不带答案/
-      带答案/
+    json/
+      做过/
+      没做过/
+    markdown/
+      做过/
+      没做过/
 ```
 
 ## 配置
@@ -167,6 +169,16 @@ python3 -m eduplus_tools ppt --dry-run
 python3 -m eduplus_tools homework
 ```
 
+默认导出不带答案的 JSON 和 Markdown。需要答案时可指定：
+
+```bash
+# 只导出带答案版本
+python3 -m eduplus_tools homework --homework-answer-mode answers
+
+# 同时导出不带答案和带答案 Markdown，JSON 保留答案字段
+python3 -m eduplus_tools homework --homework-answer-mode both
+```
+
 临时覆盖配置：
 
 ```bash
@@ -186,7 +198,7 @@ python3 -m eduplus_tools all \
 ## 说明
 
 - `config.json`、`downloads/` 已加入 `.gitignore`。
-- 作业接口返回答案字段时，工具会同时生成“不带答案”和“带答案”两个文本版本。
+- 作业会按 `做过`、`没做过` 分目录输出；默认不导出答案字段。
 - `--dry-run` 只适用于 PPT 下载预览；运行 `all --dry-run` 时会跳过作业抓取。
 - 网页界面默认按次提交 `SESSION`，不会在服务端落盘；公开部署时更安全，但仍建议加反向代理和访问控制。
 - 网页界面的 `公共模式` 会隔离每次任务输出，并要求用户自己填写 `SESSION`；`本地输出` 会直接写入你填写的目录，也可以在受信任环境中复用服务端 `config.json` 里的 `SESSION`。

@@ -249,6 +249,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                     course_id=config.course_id,
                     output_root=output_root,
                     convert_existing=not bool(payload.get("skip_existing_homework_convert")),
+                    answer_mode=normalize_homework_answer_mode(payload.get("homework_answer_mode")),
                     log=log,
                 ),
             )
@@ -285,6 +286,13 @@ def _int(value: object) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
+
+
+def normalize_homework_answer_mode(value: object) -> str:
+    mode = str(value or "plain").strip().lower()
+    if mode in {"plain", "answers", "both"}:
+        return mode
+    return "plain"
 
 
 def _job_output_root(payload: dict[str, object], job_id: str) -> Path:
