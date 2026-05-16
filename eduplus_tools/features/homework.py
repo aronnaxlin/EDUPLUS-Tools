@@ -14,6 +14,12 @@ from ..core.client import EduplusClient
 from ..core.config import safe_filename
 
 HomeworkAnswerMode = Literal["plain", "answers", "both"]
+HomeworkStatusMode = Literal["all", "done", "undone"]
+HOMEWORK_STATUS_MODE_LABELS = {
+    "all": "两者都要",
+    "done": "做过的作业",
+    "undone": "未做的作业",
+}
 
 
 def normalize_answer_mode(value: str | None) -> HomeworkAnswerMode:
@@ -37,8 +43,48 @@ def normalize_answer_mode(value: str | None) -> HomeworkAnswerMode:
     return resolved  # type: ignore[return-value]
 
 
+def normalize_status_mode(value: str | None) -> HomeworkStatusMode:
+    mode = (value or "all").strip().lower()
+    aliases = {
+        "all": "all",
+        "both": "all",
+        "any": "all",
+        "全部": "all",
+        "两者都要": "all",
+        "done": "done",
+        "finished": "done",
+        "complete": "done",
+        "completed": "done",
+        "submitted": "done",
+        "answered": "done",
+        "做过": "done",
+        "已做": "done",
+        "做过的作业": "done",
+        "undone": "undone",
+        "unfinished": "undone",
+        "incomplete": "undone",
+        "unsubmitted": "undone",
+        "unanswered": "undone",
+        "not-done": "undone",
+        "not_done": "undone",
+        "未做": "undone",
+        "没做过": "undone",
+        "未做的作业": "undone",
+    }
+    resolved = aliases.get(mode)
+    if resolved not in {"all", "done", "undone"}:
+        raise ValueError(f"Unsupported homework status mode: {value}")
+    return resolved  # type: ignore[return-value]
+
+
 def is_done_folder(is_done: bool) -> str:
     return "做过" if is_done else "没做过"
+
+
+def homework_matches_status_mode(is_done: bool, status_mode: HomeworkStatusMode) -> bool:
+    if status_mode == "all":
+        return True
+    return is_done if status_mode == "done" else not is_done
 
 
 ANSWER_RELATED_KEYS = {"answer", "userAnswer", "isCorrect", "userScore", "hwAnswerId"}
@@ -199,6 +245,7 @@ def process_homework(
     output_dir: Path,
     *,
     include_answers_json: bool,
+    status_mode: HomeworkStatusMode = "all",
     log: Callable[[str], None] = print,
 ) -> Path | None:
     homework_name = str(homework["name"])
@@ -211,6 +258,9 @@ def process_homework(
         return None
     is_done = infer_questions_done(questions, is_done)
     status_folder = is_done_folder(is_done)
+    if not homework_matches_status_mode(is_done, status_mode):
+        log(f"已跳过《{homework_name}》：题目详情判定为{status_folder}，不在当前作业范围内。")
+        return None
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = output_dir / status_folder / f"作业_{safe_name}_{timestamp}.json"
@@ -391,6 +441,19 @@ def convert_to_md(
         return []
 
 
+def json_file_matches_status_mode(json_path: Path, status_mode: HomeworkStatusMode) -> bool:
+    if status_mode == "all":
+        return True
+
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        status_folder = infer_json_status_folder(data)
+    except Exception:
+        status_folder = json_path.parent.name
+
+    return homework_matches_status_mode(status_folder == "做过", status_mode)
+
+
 def scrape_homework(
     client: EduplusClient,
     *,
@@ -398,9 +461,11 @@ def scrape_homework(
     output_root: Path,
     convert_existing: bool = True,
     answer_mode: HomeworkAnswerMode = "plain",
+    status_mode: HomeworkStatusMode = "all",
     log: Callable[[str], None] = print,
 ) -> int:
     answer_mode = normalize_answer_mode(answer_mode)
+    status_mode = normalize_status_mode(status_mode)
     json_dir = output_root / "homework" / "json"
     md_dir = output_root / "homework" / "markdown"
     json_dir.mkdir(parents=True, exist_ok=True)
@@ -416,13 +481,27 @@ def scrape_homework(
 
     answer_mode_label = {"plain": "不带答案", "answers": "带答案", "both": "两者都要"}[answer_mode]
     log(f"作业答案导出：{answer_mode_label}")
+    log(f"作业范围：{HOMEWORK_STATUS_MODE_LABELS[status_mode]}")
     done_count = sum(1 for homework in homeworks if homework.get("is_done"))
     undone_count = len(homeworks) - done_count
     log(f"找到 {len(homeworks)} 份作业：做过 {done_count} 份，没做过 {undone_count} 份。")
+    selected_homeworks = [homework for homework in homeworks if homework_matches_status_mode(bool(homework.get("is_done")), status_mode)]
+    if len(selected_homeworks) != len(homeworks):
+        log(f"本次将处理 {len(selected_homeworks)} 份符合范围的作业。")
+    if not selected_homeworks:
+        log("没有符合当前范围的作业。")
+
     json_files = []
-    for homework in homeworks:
+    for homework in selected_homeworks:
         log(f"\n正在处理作业：{homework['name']}（{homework.get('status_folder')}）")
-        json_path = process_homework(client, homework, json_dir, include_answers_json=answer_mode in {"answers", "both"}, log=log)
+        json_path = process_homework(
+            client,
+            homework,
+            json_dir,
+            include_answers_json=answer_mode in {"answers", "both"},
+            status_mode=status_mode,
+            log=log,
+        )
         if json_path:
             json_files.append(json_path)
             log(f"已保存 JSON：{json_path}")
@@ -435,6 +514,8 @@ def scrape_homework(
     if convert_existing:
         for json_file in json_dir.rglob("*.json"):
             if json_file not in json_files:
+                if not json_file_matches_status_mode(json_file, status_mode):
+                    continue
                 log(f"正在转换已有文件：{json_file.name}")
                 convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log)
 

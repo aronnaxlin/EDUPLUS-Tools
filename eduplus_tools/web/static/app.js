@@ -37,6 +37,7 @@ const SUMMARY_LABELS = {
   output: "输出目录",
   session_source: "SESSION 来源",
   session: "SESSION",
+  homework_status_mode: "作业范围",
   artifacts: "输出文件",
   bundle: "打包结果",
 };
@@ -371,6 +372,7 @@ function collectPayload() {
     base_url: formData.get("base_url"),
     timeout: formData.get("timeout"),
     homework_answer_mode: formData.get("homework_answer_mode"),
+    homework_status_mode: formData.get("homework_status_mode"),
     dry_run: formData.get("dry_run") === "on",
     overwrite: formData.get("overwrite") === "on",
     skip_existing_homework_convert: formData.get("skip_existing_homework_convert") === "on",

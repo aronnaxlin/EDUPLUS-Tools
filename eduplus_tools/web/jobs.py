@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..core.client import EduplusClient
 from ..core.config import load_config, mask_value
-from ..features.homework import scrape_homework
+from ..features.homework import HOMEWORK_STATUS_MODE_LABELS, scrape_homework
 from ..features.ppt import download_ppt_files
 
 
@@ -206,6 +206,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
         client = EduplusClient(config, verbose=bool(payload.get("verbose")), log=log)
         output_root = Path(config.output)
         session_source = "当前填写" if requested_session else ("服务端配置" if execution_mode == "local" else "当前填写")
+        homework_status_mode = normalize_homework_status_mode(payload.get("homework_status_mode"))
 
         job_store.update(
             job_id,
@@ -218,6 +219,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                 "output": str(output_root),
                 "session_source": session_source,
                 "session": mask_value(config.session),
+                "homework_status_mode": homework_status_mode_label(homework_status_mode),
             },
         )
         log(f"课程 ID：{config.course_id}")
@@ -250,6 +252,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                     output_root=output_root,
                     convert_existing=not bool(payload.get("skip_existing_homework_convert")),
                     answer_mode=normalize_homework_answer_mode(payload.get("homework_answer_mode")),
+                    status_mode=homework_status_mode,
                     log=log,
                 ),
             )
@@ -263,6 +266,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
             "mode": execution_mode_label(execution_mode),
             **config_summary(config, output_root),
             "session_source": session_source,
+            "homework_status_mode": homework_status_mode_label(homework_status_mode),
             "artifacts": str(artifacts["artifact_count"]),
             "bundle": "可下载" if artifacts["artifact_count"] else "无文件",
         }
@@ -293,6 +297,17 @@ def normalize_homework_answer_mode(value: object) -> str:
     if mode in {"plain", "answers", "both"}:
         return mode
     return "plain"
+
+
+def normalize_homework_status_mode(value: object) -> str:
+    mode = str(value or "all").strip().lower()
+    if mode in {"all", "done", "undone"}:
+        return mode
+    return "all"
+
+
+def homework_status_mode_label(mode: str) -> str:
+    return HOMEWORK_STATUS_MODE_LABELS.get(mode, HOMEWORK_STATUS_MODE_LABELS["all"])
 
 
 def _job_output_root(payload: dict[str, object], job_id: str) -> Path:

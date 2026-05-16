@@ -179,6 +179,16 @@ python3 -m eduplus_tools homework --homework-answer-mode answers
 python3 -m eduplus_tools homework --homework-answer-mode both
 ```
 
+只抓取某个作答范围：
+
+```bash
+# 只抓取未做的作业
+python3 -m eduplus_tools homework --homework-status-mode undone
+
+# 只抓取做过的作业
+python3 -m eduplus_tools homework --homework-status-mode done
+```
+
 临时覆盖配置：
 
 ```bash
@@ -198,7 +208,7 @@ python3 -m eduplus_tools all \
 ## 说明
 
 - `config.json`、`downloads/` 已加入 `.gitignore`。
-- 作业会按 `做过`、`没做过` 分目录输出；默认不导出答案字段。
+- 作业会按 `做过`、`没做过` 分目录输出；默认两者都抓取且不导出答案字段。
 - `--dry-run` 只适用于 PPT 下载预览；运行 `all --dry-run` 时会跳过作业抓取。
 - 网页界面默认按次提交 `SESSION`，不会在服务端落盘；公开部署时更安全，但仍建议加反向代理和访问控制。
 - 网页界面的 `公共模式` 会隔离每次任务输出，并要求用户自己填写 `SESSION`；`本地输出` 会直接写入你填写的目录，也可以在受信任环境中复用服务端 `config.json` 里的 `SESSION`。
