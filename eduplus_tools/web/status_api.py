@@ -9,15 +9,14 @@ from typing import Any, Protocol
 from urllib.parse import ParseResult, parse_qs, unquote
 
 from ..features.status import (
-    CHINA_TZ,
     TASK_STATES,
     TASK_TYPES,
     SessionExpiredError,
     UpstreamError,
     course_is_active,
     course_to_api,
+    filter_tasks,
     parse_iso,
-    task_is_overdue,
     task_to_api,
 )
 from ..monitor.service import StatusMonitor
@@ -184,30 +183,18 @@ class StatusApi:
 
         snapshot = self._require_snapshot()
         now = self._monitor.now()
-        active_courses = {course.id for course in snapshot.courses if course_is_active(course, now)}
-        selected = []
-        for task in snapshot.tasks.values():
-            due_at = parse_iso(task.due_at)
-            if types and task.type not in types:
-                continue
-            if states and task.state not in states:
-                continue
-            if course_ids and task.course_id not in course_ids:
-                continue
-            if active_only and task.course_id not in active_courses:
-                continue
-            if overdue is not None and task_is_overdue(task, now) != overdue:
-                continue
-            if (due_after or due_before) and due_at is None:
-                continue
-            if due_after and due_at <= due_after:
-                continue
-            if due_before and due_at >= due_before:
-                continue
-            selected.append(task)
-
-        far_future = datetime.max.replace(tzinfo=CHINA_TZ)
-        selected.sort(key=lambda task: (parse_iso(task.due_at) or far_future, task.id))
+        selected = filter_tasks(
+            snapshot.tasks.values(),
+            snapshot.courses,
+            now,
+            types=types,
+            states=states,
+            course_ids=course_ids,
+            active_courses_only=bool(active_only),
+            overdue=overdue,
+            due_after=due_after,
+            due_before=due_before,
+        )
         return {
             "items": [task_to_api(task, now) for task in selected],
             "scanned_at": snapshot.scanned_at,

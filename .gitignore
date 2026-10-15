@@ -1,4 +1,7 @@
 config.json
+.env
+docker-compose.override.yml
+HANDOFF.md
 downloads/
 __pycache__/
 *.pyc

@@ -15,3 +15,5 @@ theme-*.png
 webui-*.log
 config.json
 .env
+docker-compose.override.yml
+HANDOFF.md

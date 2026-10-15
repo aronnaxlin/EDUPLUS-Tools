@@ -1,6 +1,6 @@
 # EDUPLUS 工具
 
-用于下载 EDUPLUS 课件和抓取作业内容的工具，支持命令行和网页界面两种使用方式。
+用于下载 EDUPLUS 课件、抓取作业内容，以及查询作业和实验提交状态的工具，支持命令行和网页界面。
 
 ## 目录说明
 
@@ -14,6 +14,9 @@ eduplus_tools/
   features/
     ppt.py      # PPT/PPTX 课件下载
     homework.py # 作业抓取、JSON 保存、文本转换
+    status.py   # 课程、作业与实验状态抓取及筛选
+  monitor/      # 定时扫描、快照差异与 SQLite 存储
+  notify/       # Telegram 提醒 bot（通过 HTTP 消费状态 API）
   web/
     server.py   # 网页界面服务入口
     static/     # HTML/CSS/JS 静态资源
@@ -33,13 +36,15 @@ downloads/
 
 ## 配置
 
-复制配置模板，并填写自己的 `SESSION` 和课程 ID：
+复制配置模板，填写登录凭据 `session`；下载课件或作业时还需要填写 `course_id`：
 
 ```bash
 cp config.example.json config.json
 ```
 
-`config.json` 已加入 `.gitignore`，不要提交自己的登录信息。如果 `SESSION` 失效，重新从浏览器 Cookie 中复制后更新即可。
+`session` 字段和 `--session` 参数应填入登录后 `www.eduplus.net` 浏览器开发者工具中 **Local Storage → AccessToken** 的值。请求通过 `x-access-token` 头鉴权，只复制 `SESSION` Cookie 不足以访问接口。凭据失效后，在浏览器重新登录，再更新这个值。
+
+`config.json` 已加入 `.gitignore`，不要提交自己的登录信息，也不要把 token 粘贴到日志或截图里。
 
 ## 启动方式
 
@@ -199,6 +204,56 @@ EDUPLUS_ENABLE_LOCAL_OUTPUT=true docker compose up -d --build
 
 ## 命令行用法
 
+### 查询课程、作业与实验状态
+
+这两条命令只需要 `session`，不需要 `course_id`，也不需要启动网页服务。它们直接请求 EDUPLUS，不读取或写入检测服务的快照和事件。
+
+```bash
+# 列出未结课的课程及其 ID
+python3 -m eduplus_tools courses
+
+# 查看未结课课程里的全部作业和实验，按截止时间排序，无截止时间的排最后
+python3 -m eduplus_tools tasks
+
+# 未提交的任务（包括已逾期的任务）
+python3 -m eduplus_tools tasks --state not_submitted
+
+# 接下来 24 小时内截止、尚未提交的任务，不含已逾期任务
+python3 -m eduplus_tools tasks --state not_submitted --due-within 24
+
+# 只看已逾期且未提交的任务
+python3 -m eduplus_tools tasks --overdue
+
+# 只看某门课的实验
+python3 -m eduplus_tools tasks --course-id "课程 ID" --type experiment
+
+# 查询已结课课程；courses 也支持 --all-courses
+python3 -m eduplus_tools tasks --all-courses --course-id "已结课的课程 ID"
+
+# 输出 JSON，适合脚本或 agent 读取
+python3 -m eduplus_tools courses --json
+python3 -m eduplus_tools tasks --state submitted --state graded --json
+```
+
+`tasks` 的筛选参数：
+
+| 参数 | 含义 |
+|---|---|
+| `--state` | `not_submitted`（未提交）、`submitted`（已提交待批改）、`graded`（已批改），可重复 |
+| `--type` | `homework`（作业）、`experiment`（实验），可重复 |
+| `--course-id` | 只看指定课程；配置文件里的 `course_id` 不会限制状态查询 |
+| `--due-within HOURS` | 截止时间严格晚于当前时间、早于 HOURS 小时后；HOURS 必须是正的有限数，可带小数 |
+| `--overdue` | 只看截止时间已过且未提交的任务 |
+| `--all-courses` | 包含已结课课程；默认只看未结课课程 |
+
+同一参数的多个值取并集，不同筛选条件取交集。时间以北京时间（UTC+8）显示；没有截止时间的任务不匹配 `--due-within` 或 `--overdue`。
+
+`--json` 的标准输出只包含 JSON，警告和 `--verbose` 请求日志写入标准错误。`courses` 返回 `items`；`tasks` 返回 `fetched_at`、`items` 和 `partial_failures`，任务字段与 `/api/v1/tasks` 一致，但直接查询不记录首次发现时间，`first_seen_at` 为空字符串。
+
+退出码：成功为 `0`，上游请求整体失败为 `1`，登录态失效或命令行参数错误为 `2`。个别课程抓取失败时仍返回 `0`，成功抓到的任务照常输出；请检查 `partial_failures` 或标准错误里的警告，不要将部分结果视为完整列表。
+
+### 下载课件与作业
+
 下载课件并抓取作业：
 
 ```bash
@@ -250,6 +305,12 @@ python3 -m eduplus_tools all \
   --session "新的SESSION" \
   --course-id "新的课程 ID"
 ```
+
+## 给通用 agent 的技能
+
+[`skills/eduplus-status/SKILL.md`](skills/eduplus-status/SKILL.md) 提供课程、作业与实验状态查询，以及作业题目获取和 JSON/Markdown 导出流程。默认导出不带答案；用户明确需要时可导出平台已提供的答案。技能不代为提交、撤回或修改平台数据，也不涉及部署、通知配置或自动续期。
+
+将 `skills/eduplus-status/` 作为技能目录交给支持 `SKILL.md` 的 agent 加载，并告知本仓库的实际路径。运行时使用本地已配置的 `config.json`，不要把凭据复制进技能文件。可用“查 U+ 还有什么没交”或“把这门课的未交作业题目导出成 Markdown”测试。
 
 ## 配置优先级
 

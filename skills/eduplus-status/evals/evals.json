@@ -1,0 +1,29 @@
+{
+  "skill_name": "eduplus-status",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我查一下 U+ 未来 24 小时内还有什么没交，已经逾期的也单独列出来。没有截止日期的别混到这两组里。",
+      "expected_output": "在已配置的项目中使用 tasks --state not_submitted --json，按北京时间归类近期截止和已逾期；或分别运行近期、逾期两条只读查询。保留课程、类型、标题、状态、日期及任务链接。不把已提交、无截止日期或已结课课程的任务混入默认范围。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "U+ 上学期（2025-2026 第一学期）的操作系统已经结课了，帮我看看那门课的实验都交了没，带上截止日期。",
+      "expected_output": "先用 courses --all-courses --json 按名称和学期取得课程 ID，有歧义时询问用户；再用 tasks --all-courses --course-id 对应ID --type experiment --json。按归一化 state 解读，不把已过截止时间的 submitted 实验说成逾期，不编造空截止时间。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "帮我查一下 EDUPLUS 还有哪些没交。如果查不到，告诉我原因，别改配置，也别让我把登录 token 发给你。",
+      "expected_output": "查询 tasks --state not_submitted --json，并保留退出码和标准错误。分别检查两种故障：退出码 0 且 items 为空、partial_failures 非空时报告查询不完整；退出码 2 且 stderr 表示登录失效时，请用户浏览器重新登录并自行更新本地 config.json 的 session。两者都不能声称全部交完，不读取、输出或传递凭据，不自动续期或反复重试。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "把 U+ 这学期操作系统里还没交的作业题目导出成 Markdown，不要答案，不要替我提交。放到我指定的本次输出目录，导出后告诉我文件位置。",
+      "expected_output": "先查 courses --json 确定课程 ID，再用 homework --course-id 对应ID --output 用户目录 --homework-answer-mode plain --homework-status-mode undone --skip-existing-homework-convert。检查本次 JSON/Markdown 文件和错误日志后交付实际 Markdown 路径。不要给 homework 传 --json、--state 或虚构的 --homework-id，不读取旧导出，不输出凭据，不调用提交或部署操作。",
+      "files": []
+    }
+  ]
+}

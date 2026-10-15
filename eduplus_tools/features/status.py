@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.parse
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -188,6 +189,46 @@ def course_is_active(course: Course, now: datetime) -> bool:
 def task_is_overdue(task: Task, now: datetime) -> bool:
     due_at = parse_iso(task.due_at)
     return task.state == "not_submitted" and due_at is not None and due_at < now
+
+
+def filter_tasks(
+    tasks: Iterable[Task],
+    courses: Iterable[Course],
+    now: datetime,
+    *,
+    types: Collection[str] = (),
+    states: Collection[str] = (),
+    course_ids: Collection[str] = (),
+    active_courses_only: bool = True,
+    overdue: bool | None = None,
+    due_after: datetime | None = None,
+    due_before: datetime | None = None,
+) -> list[Task]:
+    """Shared task query used by the status API and the CLI; sorted by due date, undated last."""
+    active_courses = {course.id for course in courses if course_is_active(course, now)}
+    selected = []
+    for task in tasks:
+        due_at = parse_iso(task.due_at)
+        if types and task.type not in types:
+            continue
+        if states and task.state not in states:
+            continue
+        if course_ids and task.course_id not in course_ids:
+            continue
+        if active_courses_only and task.course_id not in active_courses:
+            continue
+        if overdue is not None and task_is_overdue(task, now) != overdue:
+            continue
+        if (due_after or due_before) and due_at is None:
+            continue
+        if due_after and due_at <= due_after:
+            continue
+        if due_before and due_at >= due_before:
+            continue
+        selected.append(task)
+    far_future = datetime.max.replace(tzinfo=CHINA_TZ)
+    selected.sort(key=lambda task: (parse_iso(task.due_at) or far_future, task.id))
+    return selected
 
 
 def course_to_api(course: Course, now: datetime) -> dict[str, Any]:
