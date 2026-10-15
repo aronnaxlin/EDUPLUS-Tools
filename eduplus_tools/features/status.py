@@ -4,14 +4,14 @@ import json
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 from ..core.client import EduplusClient
+from ..core.times import CHINA_TZ, parse_iso
 from .homework import is_submitted_sub_status
 
 
-CHINA_TZ = timezone(timedelta(hours=8))
 UPSTREAM_OK = 2000000
 # 4010000: not logged in; 4000203: the frontend logs out and asks to log in again.
 UPSTREAM_SESSION_EXPIRED_CODES = {4010000, 4000203}
@@ -91,13 +91,6 @@ def ms_to_iso(value: Any) -> str | None:
         return datetime.fromtimestamp(int(value) / 1000, tz=CHINA_TZ).isoformat(timespec="seconds")
     except (TypeError, ValueError, OverflowError, OSError):
         return None
-
-
-def parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    parsed = datetime.fromisoformat(value)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=CHINA_TZ)
 
 
 def to_number(value: Any) -> float | None:

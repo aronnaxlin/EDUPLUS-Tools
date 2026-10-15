@@ -28,3 +28,24 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  eduplus-telegram:
+    build: .
+    container_name: eduplus-telegram
+    init: true
+    profiles: ["telegram"]
+    command: ["python", "-m", "eduplus_tools.notify"]
+    environment:
+      EDUPLUS_STATUS_URL: http://eduplus-web:8000
+      EDUPLUS_STATUS_TOKEN: ${EDUPLUS_STATUS_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_REMINDER_HOURS: ${TELEGRAM_REMINDER_HOURS:-24,3}
+      TELEGRAM_STATE_FILE: downloads/status/telegram-state.json
+    volumes:
+      - ./downloads:/app/downloads
+    depends_on:
+      - eduplus-web
+    healthcheck:
+      disable: true
+    restart: unless-stopped

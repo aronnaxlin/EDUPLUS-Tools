@@ -146,6 +146,35 @@ EDUPLUS_SESSION=                              # 可选，覆盖配置文件里�
 
 服务启动后会立即扫描一次，之后按间隔扫描。第一次扫描只记录现状，不会把已有作业当成新布置的。每次扫描都会重新读取配置文件，更新 `SESSION` 后不需要重启。
 
+## Telegram 作业提醒
+
+Telegram bot 是状态检测 API 的一个消费方，单独运行，只通过 HTTP 读取上面那组接口：
+
+- 推送新布置的作业和实验、截止时间变更、批改结果、变回未提交（自己撤回或老师打回）、任务被删除，以及 EDUPLUS 登录态失效和恢复。
+- 未提交的任务在截止前 24 小时和 3 小时各提醒一次；截止时间改了会重新提醒。
+- 命令：`/todo` 查看未提交和已逾期的任务，`/status` 查看登录态和最近一次扫描，`/scan` 立即扫描。
+- 只给 `TELEGRAM_CHAT_ID` 推送，也只响应这个聊天里的命令。其他人发命令会收到自己的 chat id 和拒绝提示，可以借此查到自己的 chat id。
+
+用 [@BotFather](https://t.me/BotFather) 创建 bot 拿到 token，先开启状态检测 API，再启动 bot：
+
+```bash
+EDUPLUS_STATUS_TOKEN="和网页服务相同的 token" \
+TELEGRAM_BOT_TOKEN="BotFather 给的 token" \
+TELEGRAM_CHAT_ID="你的 chat id" \
+python3 -m eduplus_tools.notify --status-url http://127.0.0.1:8000
+```
+
+相关环境变量：
+
+```text
+EDUPLUS_STATUS_URL=http://127.0.0.1:8000
+TELEGRAM_REMINDER_HOURS=24,3                  # 截止前多少小时提醒
+TELEGRAM_POLL_INTERVAL_SECONDS=60             # 检查新事件和提醒的间隔
+TELEGRAM_STATE_FILE=downloads/status/telegram-state.json
+```
+
+第一次启动只记下事件流的位置，不补发历史事件；推送失败的事件会在下一轮重发。Docker 部署时用 `docker compose --profile telegram up -d --build` 同时启动网页服务和 bot。
+
 ## Docker 配置
 
 常用环境变量：

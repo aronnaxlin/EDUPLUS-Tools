@@ -6,6 +6,7 @@
 - `eduplus_tools/core/` contains configuration loading and the EDUPLUS HTTP client.
 - `eduplus_tools/features/` contains task implementations: `ppt.py` for courseware, `homework.py` for homework export, and `status.py` for fetching and normalizing homework/experiment status.
 - `eduplus_tools/monitor/` contains the status scanner: snapshot diffing into events, SQLite storage, and the scan scheduler.
+- `eduplus_tools/notify/` contains the Telegram bot (`python3 -m eduplus_tools.notify`). It only consumes the `/api/v1` status API over HTTP and never imports `features` or `monitor` scanning code.
 - `eduplus_tools/web/` contains the web server, job handling, the `/api/v1` status API (`status_api.py`, spec in `docs/openapi/status-api.yaml`), and `static/` HTML/CSS/JS assets.
 - `config.example.json` documents local configuration. Real `config.json` and generated `downloads/` output stay uncommitted.
 - `Dockerfile`, `docker-compose.yml`, and `start_webui.sh` support web UI deployment.
