@@ -98,25 +98,21 @@ def strip_answer_fields(value: Any) -> Any:
     return value
 
 
-def infer_homework_done(item: dict[str, Any]) -> bool:
-    submit_task = item.get("submitTask")
-    if submit_task is not None:
-        return str(submit_task) == "1"
+# homeworkDTO.subStatus: 0 = not submitted, 1 = submitted, 3 = graded.
+# submitTask and per-question isAnswer do not reflect submission: a saved but
+# unsubmitted homework has isAnswer=1 on every question.
+SUBMITTED_SUB_STATUSES = {"1", "2", "3"}
 
+
+def is_submitted_sub_status(sub_status: Any) -> bool:
+    return str(sub_status) in SUBMITTED_SUB_STATUSES
+
+
+def infer_homework_done(item: dict[str, Any]) -> bool:
     homework = item.get("homeworkDTO", {})
     if not isinstance(homework, dict):
         return False
-    if homework.get("userScore") is not None:
-        return True
-    sub_status = homework.get("subStatus")
-    return str(sub_status) in {"1", "2", "3"}
-
-
-def infer_questions_done(questions: list[dict[str, Any]], fallback: bool) -> bool:
-    answer_values = [question.get("isAnswer") for question in questions if question.get("isAnswer") is not None]
-    if not answer_values:
-        return fallback
-    return all(str(value) == "1" for value in answer_values)
+    return is_submitted_sub_status(homework.get("subStatus"))
 
 
 def html_to_md(text: Any) -> str:
@@ -245,7 +241,6 @@ def process_homework(
     output_dir: Path,
     *,
     include_answers_json: bool,
-    status_mode: HomeworkStatusMode = "all",
     log: Callable[[str], None] = print,
 ) -> Path | None:
     homework_name = str(homework["name"])
@@ -256,11 +251,7 @@ def process_homework(
     if not questions:
         log(f"无法获取《{homework_name}》的题目详情。")
         return None
-    is_done = infer_questions_done(questions, is_done)
     status_folder = is_done_folder(is_done)
-    if not homework_matches_status_mode(is_done, status_mode):
-        log(f"已跳过《{homework_name}》：题目详情判定为{status_folder}，不在当前作业范围内。")
-        return None
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = output_dir / status_folder / f"作业_{safe_name}_{timestamp}.json"
@@ -395,6 +386,9 @@ def write_md_output(data: dict[str, Any], md_path: Path, include_answers: bool =
 
 
 def infer_json_status_folder(data: dict[str, Any]) -> str:
+    # Older exports chose status_folder from submitTask, so trust subStatus first.
+    if data.get("subStatus") is not None:
+        return is_done_folder(is_submitted_sub_status(data.get("subStatus")))
     if "status_folder" in data:
         folder = str(data.get("status_folder") or "")
         if folder in {"做过", "没做过"}:
@@ -499,7 +493,6 @@ def scrape_homework(
             homework,
             json_dir,
             include_answers_json=answer_mode in {"answers", "both"},
-            status_mode=status_mode,
             log=log,
         )
         if json_path:
