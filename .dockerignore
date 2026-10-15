@@ -13,3 +13,5 @@ edup-webui-preview*.png
 scale-check-*.png
 theme-*.png
 webui-*.log
+config.json
+.env
