@@ -15,6 +15,10 @@ services:
       EDUPLUS_PUBLIC_OUTPUT_ROOT: ${EDUPLUS_PUBLIC_OUTPUT_ROOT:-downloads/web-jobs}
       EDUPLUS_BUNDLE_ROOT: ${EDUPLUS_BUNDLE_ROOT:-downloads/web-bundles}
       EDUPLUS_LOCAL_OUTPUT_ROOT: ${EDUPLUS_LOCAL_OUTPUT_ROOT:-downloads}
+      EDUPLUS_STATUS_TOKEN: ${EDUPLUS_STATUS_TOKEN:-}
+      EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS: ${EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS:-600}
+      EDUPLUS_STATUS_DB: ${EDUPLUS_STATUS_DB:-downloads/status/status.sqlite3}
+      EDUPLUS_SESSION: ${EDUPLUS_SESSION:-}
     volumes:
       - ./downloads:/app/downloads
     healthcheck:

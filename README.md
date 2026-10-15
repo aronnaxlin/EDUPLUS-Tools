@@ -121,6 +121,31 @@ bash start_webui.sh \
 - 公共模式优先任务隔离和下载分发
 - 本地模式优先直接落盘到你的目录
 
+## 作业与实验状态检测 API
+
+网页服务可以额外开启一组只读接口，定时扫描所有课程的作业和实验，记录提交状态、截止时间，以及两次扫描之间的变化（新布置、已提交、已批改、撤回、截止时间变更等）。接口规格见 [`docs/openapi/status-api.yaml`](docs/openapi/status-api.yaml)，Telegram 通知等消费方只需要读这组接口。
+
+这组接口用服务端 `config.json` 里的 `SESSION` 访问 EDUPLUS，也可以用环境变量 `EDUPLUS_SESSION` 覆盖。因此只适合自己私有部署，默认关闭，设置访问 token 后才会开启：
+
+```bash
+EDUPLUS_STATUS_TOKEN="自己生成的长随机字符串" python3 -m eduplus_tools.web --host 127.0.0.1 --port 8000
+
+curl -H "Authorization: Bearer $EDUPLUS_STATUS_TOKEN" \
+  "http://127.0.0.1:8000/api/v1/tasks?state=not_submitted"
+```
+
+相关环境变量：
+
+```text
+EDUPLUS_STATUS_TOKEN=                         # 留空则不开启
+EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS=600      # 扫描间隔，最少 60 秒
+EDUPLUS_STATUS_DB=downloads/status/status.sqlite3
+EDUPLUS_STATUS_CONFIG=config.json             # 读取 SESSION 的配置文件
+EDUPLUS_SESSION=                              # 可选，覆盖配置文件里的 SESSION
+```
+
+服务启动后会立即扫描一次，之后按间隔扫描。第一次扫描只记录现状，不会把已有作业当成新布置的。每次扫描都会重新读取配置文件，更新 `SESSION` 后不需要重启。
+
 ## Docker 配置
 
 常用环境变量：

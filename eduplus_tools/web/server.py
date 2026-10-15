@@ -11,16 +11,21 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
-from ..core.config import inspect_config_defaults
+from ..core.client import EduplusClient
+from ..core.config import inspect_config_defaults, load_config
+from ..monitor.service import EduplusUpstream, StatusMonitor
+from ..monitor.store import StatusStore
 from .jobs import JobStore, build_job_bundle, cleanup_job_artifacts, cleanup_job_bundle, configure_storage, list_job_artifacts, run_job_async, serialize_job
+from .status_api import StatusApi
 
 
 WEB_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = WEB_ROOT / "static"
 JOB_STORE = JobStore()
 SERVER_CONFIG: "WebServerConfig | None" = None
+STATUS_API: StatusApi | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,10 @@ class WebServerConfig:
     public_output_root: Path
     bundle_root: Path
     local_output_root: Path
+    status_token: str
+    status_db: Path
+    status_scan_interval_seconds: int
+    status_config: str
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -59,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--public-output-root", default=os.getenv("EDUPLUS_PUBLIC_OUTPUT_ROOT", "downloads/web-jobs"), help="公共模式任务隔离目录")
     parser.add_argument("--bundle-root", default=os.getenv("EDUPLUS_BUNDLE_ROOT", "downloads/web-bundles"), help="ZIP 打包输出目录")
     parser.add_argument("--local-output-root", default=os.getenv("EDUPLUS_LOCAL_OUTPUT_ROOT", "downloads"), help="本地输出模式默认目录")
+    parser.add_argument("--status-token", default=os.getenv("EDUPLUS_STATUS_TOKEN", ""), help="状态检测 API 的访问 token；留空则不启用")
+    parser.add_argument("--status-db", default=os.getenv("EDUPLUS_STATUS_DB", "downloads/status/status.sqlite3"), help="状态检测快照和事件的存储位置")
+    parser.add_argument("--status-scan-interval-seconds", type=int, default=env_int("EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS", 600), help="状态检测扫描间隔，最少 60 秒")
+    parser.add_argument("--status-config", default=os.getenv("EDUPLUS_STATUS_CONFIG", "config.json"), help="状态检测读取 SESSION 的配置文件")
     return parser
 
 
@@ -73,6 +86,10 @@ def load_server_config(args: argparse.Namespace) -> WebServerConfig:
         public_output_root=Path(args.public_output_root),
         bundle_root=Path(args.bundle_root),
         local_output_root=Path(args.local_output_root),
+        status_token=str(args.status_token or "").strip(),
+        status_db=Path(args.status_db),
+        status_scan_interval_seconds=max(60, int(args.status_scan_interval_seconds)),
+        status_config=str(args.status_config),
     )
 
 
@@ -81,6 +98,9 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            self._handle_status_api("GET", parsed)
+            return
         if parsed.path == "/":
             self._serve_file(STATIC_ROOT / "index.html")
             return
@@ -141,6 +161,9 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            self._handle_status_api("POST", parsed)
+            return
         if parsed.path != "/api/run":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -162,6 +185,12 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+    def _handle_status_api(self, method: str, parsed: ParseResult) -> None:
+        if STATUS_API is None:
+            self._send_json({"error": "状态检测 API 未启用，请设置 EDUPLUS_STATUS_TOKEN", "code": "not_found"}, status=HTTPStatus.NOT_FOUND)
+            return
+        STATUS_API.handle(self, method, parsed, self.headers.get("Authorization"))
 
     def _serve_file(
         self,
@@ -199,11 +228,13 @@ class WebHandler(BaseHTTPRequestHandler):
             raise ValueError("请求内容必须是 JSON 对象")
         return payload
 
-    def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         content = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(content)
 
@@ -220,8 +251,11 @@ def main() -> int:
     server = ThreadingHTTPServer((SERVER_CONFIG.host, SERVER_CONFIG.port), WebHandler)
     cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True)
     cleanup_thread.start()
+    global STATUS_API
+    STATUS_API = build_status_api(SERVER_CONFIG)
     print(f"EDUPLUS 网页界面已启动：http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
     print(f"本地输出模式：{'已开启' if SERVER_CONFIG.enable_local_output else '未开启'}")
+    print(f"状态检测 API：{f'已开启，每 {SERVER_CONFIG.status_scan_interval_seconds} 秒扫描一次' if STATUS_API else '未开启'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -229,6 +263,27 @@ def main() -> int:
     finally:
         server.server_close()
     return 0
+
+
+def build_status_api(config: WebServerConfig) -> StatusApi | None:
+    if not config.status_token:
+        return None
+
+    def load_client() -> EduplusClient:
+        eduplus_config = load_config(
+            config_file=config.status_config,
+            session=os.getenv("EDUPLUS_SESSION"),
+            require_course_id=False,
+        )
+        return EduplusClient(eduplus_config)
+
+    monitor = StatusMonitor(
+        StatusStore(config.status_db),
+        EduplusUpstream(load_client),
+        interval_seconds=config.status_scan_interval_seconds,
+    )
+    monitor.start_scheduler()
+    return StatusApi(monitor, config.status_token)
 
 
 def _cleanup_loop() -> None:

@@ -1,0 +1,593 @@
+openapi: 3.1.0
+info:
+  title: EDUPLUS 作业与实验状态检测 API
+  version: 0.1.0
+  description: |
+    把"作业/实验状态检测"从下载导出和通知里拆出来，作为独立的一层：
+
+    1. **抓取层**（`eduplus_tools/features`）：调用 EDUPLUS 接口，把作业和实验归一化成统一的 `Task`。
+    2. **检测服务**（本 API）：按固定间隔扫描，保存最新快照，并把前后两次快照的差异记录为事件。
+    3. **消费方**（如 Telegram 通知、Web UI）：只读本 API，自己决定推送什么、何时提醒。
+       截止前提醒（24 小时、3 小时等）属于消费方策略，用 `GET /tasks` 的 `due_before` 查询即可，检测服务不产生提醒事件。
+
+    **EDUPLUS 登录态**由服务端配置，不随请求传入，因为后台扫描需要一直可用。
+    因此本服务只适合私有部署，所有接口都要求 Bearer token。
+
+    **时间**统一为带时区偏移的 ISO 8601 字符串，例如 `2026-10-15T23:59:59+08:00`。
+
+    **状态映射**（根据 2026-10-15 对照网页的实测结果）：
+
+    | 来源 | 上游字段 | `state` |
+    |---|---|---|
+    | 作业 | `homeworkDTO.subStatus = 0` | `not_submitted` |
+    | 作业 | `homeworkDTO.subStatus = 1`、`2` | `submitted` |
+    | 作业 | `homeworkDTO.subStatus = 3` | `graded` |
+    | 实验 | `experimentReports` 为空 | `not_submitted` |
+    | 实验 | `experimentReports` 非空 | `submitted` |
+
+    作业的 `submitTask` 和题目的 `isAnswer` 不表示是否已提交，不参与判断。
+    实验的"已批改"状态尚未实测到对应字段，目前实验只会出现 `not_submitted` 和 `submitted`。
+servers:
+  - url: http://127.0.0.1:8000
+    description: 本地运行的 Web 服务
+security:
+  - bearerAuth: []
+tags:
+  - name: session
+    description: EDUPLUS 登录态
+  - name: courses
+    description: 课程
+  - name: tasks
+    description: 作业与实验的当前状态
+  - name: scans
+    description: 扫描
+  - name: events
+    description: 状态变化事件流
+
+paths:
+  /api/v1/session:
+    get:
+      tags: [session]
+      operationId: getSessionStatus
+      summary: 检查服务端配置的 EDUPLUS 登录态是否有效
+      description: 实时调用上游 `/api/login/verify`，不读取快照。
+      responses:
+        "200":
+          description: 检查完成。登录态失效也返回 200，由 `valid` 表示。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/UpstreamUnavailable"
+
+  /api/v1/courses:
+    get:
+      tags: [courses]
+      operationId: listCourses
+      summary: 列出课程
+      description: 读取最新一次扫描的快照。
+      parameters:
+        - name: active
+          in: query
+          description: 只返回未结课的课程（`end_at` 晚于当前时间）。传 `false` 返回全部课程。
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: 课程列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseList"
+        "400":
+          $ref: "#/components/responses/InvalidParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/NoSnapshot"
+
+  /api/v1/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: 列出作业与实验
+      description: |
+        读取最新一次扫描的快照，按条件筛选。多个筛选条件之间是"并且"关系；
+        同一个可重复参数的多个值之间是"或者"关系，例如 `?state=not_submitted&state=submitted`。
+      parameters:
+        - name: type
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/TaskType"
+        - name: state
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/TaskState"
+        - name: course_id
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: active_courses_only
+          in: query
+          description: 只包含未结课课程里的任务。
+          schema:
+            type: boolean
+            default: true
+        - name: overdue
+          in: query
+          description: 只返回（`true`）或排除（`false`）已过截止时间仍未提交的任务。不传则不筛选。
+          schema:
+            type: boolean
+        - name: due_after
+          in: query
+          description: 只返回截止时间晚于该时刻的任务。没有截止时间的任务会被排除。
+          schema:
+            type: string
+            format: date-time
+        - name: due_before
+          in: query
+          description: 只返回截止时间早于该时刻的任务。没有截止时间的任务会被排除。
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: 任务列表，按 `due_at` 升序，没有截止时间的排在最后。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        "400":
+          $ref: "#/components/responses/InvalidParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/NoSnapshot"
+
+  /api/v1/tasks/{task_id}:
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: 获取单个任务
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 任务
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/NoSnapshot"
+
+  /api/v1/scans:
+    post:
+      tags: [scans]
+      operationId: startScan
+      summary: 立即扫描一次
+      description: |
+        服务端本身会按固定间隔扫描，这个接口用于手动触发。
+        如果已有扫描正在进行，不会新开一次，直接返回正在进行的那次。
+      responses:
+        "202":
+          description: 已开始，或已有扫描正在进行。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/scans/latest:
+    get:
+      tags: [scans]
+      operationId: getLatestScan
+      summary: 最近一次扫描（包括正在进行的）
+      responses:
+        "200":
+          description: 扫描记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/events:
+    get:
+      tags: [events]
+      operationId: listEvents
+      summary: 读取状态变化事件
+      description: |
+        事件按发生顺序排列。消费方保存上次拿到的 `next_cursor`，下次用 `after` 传回，
+        就能只拿到新事件，不会重复也不会漏掉。不传 `after` 则从最早保留的事件开始。
+
+        第一次扫描只建立基线，不产生 `task.published` 事件，避免把已有任务全部当成新布置的。
+      parameters:
+        - name: after
+          in: query
+          description: 上一页返回的 `next_cursor`。
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: type
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/EventType"
+      responses:
+        "200":
+          description: 事件列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        "400":
+          $ref: "#/components/responses/InvalidParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          description: "`after` 指向的事件已被清理，消费方需要用 `GET /tasks` 重新同步，再从最新游标继续。"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 服务端配置的访问 token，与 EDUPLUS 的登录态无关。
+
+  parameters:
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      description: 形如 `homework:1d080669372b4ceea9664685fce04045` 或 `experiment:<id>`。
+      schema:
+        type: string
+        pattern: "^(homework|experiment):[0-9a-zA-Z]+$"
+
+  responses:
+    Unauthorized:
+      description: 缺少或错误的 Bearer token。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InvalidParameter:
+      description: 查询参数不合法。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NoSnapshot:
+      description: 服务启动后还没有完成过扫描。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UpstreamUnavailable:
+      description: EDUPLUS 无法访问或返回了无法识别的内容。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: 给人看的中文说明，与现有 `/api/run` 等接口一致。
+          examples: ["还没有完成过扫描"]
+        code:
+          type: string
+          description: 给程序判断用的错误码。
+          enum:
+            - unauthorized
+            - not_found
+            - invalid_parameter
+            - no_snapshot
+            - cursor_expired
+            - upstream_session_expired
+            - upstream_unavailable
+
+    SessionStatus:
+      type: object
+      required: [valid, checked_at]
+      properties:
+        valid:
+          type: boolean
+        checked_at:
+          type: string
+          format: date-time
+        upstream_code:
+          type: [integer, "null"]
+          description: 上游返回的业务码，例如 `2000000` 有效、`4010000` 未登录、`4000203` 需要重新登录。
+          examples: [2000000]
+
+    Course:
+      type: object
+      required: [id, name, active]
+      properties:
+        id:
+          type: string
+          examples: ["e47cb4f3300943999584a79d210775aa"]
+        name:
+          type: string
+          examples: ["操作系统-24级（2026-2027-1）"]
+        term:
+          type: [string, "null"]
+          examples: ["2026-2027第一学期"]
+        start_at:
+          type: [string, "null"]
+          format: date-time
+        end_at:
+          type: [string, "null"]
+          format: date-time
+        active:
+          type: boolean
+          description: "`end_at` 晚于当前时间。"
+
+    CourseList:
+      type: object
+      required: [items, scanned_at]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Course"
+        scanned_at:
+          type: string
+          format: date-time
+          description: 数据来自哪一次扫描。
+
+    CourseRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    TaskType:
+      type: string
+      enum: [homework, experiment]
+
+    TaskState:
+      type: string
+      description: 映射规则见文档开头。
+      enum: [not_submitted, submitted, graded]
+
+    Task:
+      type: object
+      required: [id, type, course, title, state, overdue, first_seen_at, url]
+      properties:
+        id:
+          type: string
+          description: |
+            `<type>:<上游发布记录 id>`。作业用发布记录的 `id`（不是 `homeworkDTO.id`），
+            同一份作业发布到不同班级会有不同的 id。
+          examples: ["homework:1d080669372b4ceea9664685fce04045"]
+        type:
+          $ref: "#/components/schemas/TaskType"
+        course:
+          $ref: "#/components/schemas/CourseRef"
+        title:
+          type: string
+          examples: ["第一章 引论 作业"]
+        state:
+          $ref: "#/components/schemas/TaskState"
+        due_at:
+          type: [string, "null"]
+          format: date-time
+          description: 作业取 `endTime`，实验取 `submitTime`。
+        published_at:
+          type: [string, "null"]
+          format: date-time
+          description: 作业取发布记录的 `createTime`。实验上游没有发布时间，始终为 `null`。
+        first_seen_at:
+          type: string
+          format: date-time
+          description: 本服务第一次扫描到它的时间。实验判断"新布置"只能依赖这个字段。
+        overdue:
+          type: boolean
+          description: "`state` 为 `not_submitted` 且 `due_at` 早于当前时间。"
+        late_submission_allowed:
+          type: [boolean, "null"]
+          description: 作业取 `delaySubmit == 1`。实验暂未确认对应字段，为 `null`。
+        score:
+          type: [number, "null"]
+        total_score:
+          type: [number, "null"]
+        deliverables:
+          type: array
+          description: 实验要求提交的内容，来自 `reportRequired`、`codeRequired`。作业为空数组。
+          items:
+            type: string
+            enum: [report, code]
+        url:
+          type: string
+          format: uri
+          description: EDUPLUS 上对应的课程作业页或实验页，方便通知里直接点开。
+          examples: ["https://www.eduplus.net/course/course/e47cb4f3300943999584a79d210775aa/HomeworkPage?userRole="]
+        upstream:
+          type: object
+          description: 上游原始状态字段，便于排查映射问题。内容不保证稳定，消费方不要依赖。
+          additionalProperties: true
+          examples:
+            - sub_status: 1
+              submit_task: 0
+              homework_id: "60c076aee09d46c89881622052f2d470"
+
+    TaskList:
+      type: object
+      required: [items, scanned_at, partial_failures]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        scanned_at:
+          type: string
+          format: date-time
+        partial_failures:
+          type: array
+          description: 扫描时个别课程抓取失败的记录。失败课程的任务保留上一次成功扫描的结果。
+          items:
+            $ref: "#/components/schemas/ScanFailure"
+
+    ScanFailure:
+      type: object
+      required: [course_id, type, error]
+      properties:
+        course_id:
+          type: string
+        type:
+          $ref: "#/components/schemas/TaskType"
+        error:
+          type: string
+
+    Scan:
+      type: object
+      required: [id, status, started_at, trigger]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [running, succeeded, partially_failed, failed]
+        trigger:
+          type: string
+          enum: [schedule, manual]
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        task_count:
+          type: [integer, "null"]
+        event_count:
+          type: [integer, "null"]
+          description: 这次扫描产生的事件数。
+        error:
+          $ref: "#/components/schemas/Error"
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanFailure"
+
+    EventType:
+      type: string
+      description: |
+        - `task.published`：出现了新任务（基线扫描除外）。
+        - `task.submitted`：从 `not_submitted` 变为 `submitted`。
+        - `task.graded`：变为 `graded`。
+        - `task.withdrawn`：从 `submitted` 退回 `not_submitted`（网页上的"撤回作业"）。
+        - `task.due_changed`：截止时间被修改。
+        - `task.removed`：任务从上游消失。
+        - `session.expired`：扫描时发现 EDUPLUS 登录态失效。
+        - `session.restored`：登录态恢复。
+      enum:
+        - task.published
+        - task.submitted
+        - task.graded
+        - task.withdrawn
+        - task.due_changed
+        - task.removed
+        - session.expired
+        - session.restored
+
+    Event:
+      type: object
+      required: [id, type, occurred_at, scan_id]
+      properties:
+        id:
+          type: string
+          description: 事件 id，也可以直接当作游标使用。
+        type:
+          $ref: "#/components/schemas/EventType"
+        occurred_at:
+          type: string
+          format: date-time
+          description: 检测到变化的时间（扫描时间），不是上游实际发生的时间。
+        scan_id:
+          type: string
+        task:
+          oneOf:
+            - $ref: "#/components/schemas/Task"
+            - type: "null"
+          description: 变化后的任务。`task.removed` 时为消失前的最后状态，`session.*` 事件为 `null`。
+        changes:
+          type: object
+          description: 发生变化的字段，键为 `Task` 的字段名。
+          additionalProperties:
+            $ref: "#/components/schemas/FieldChange"
+          examples:
+            - state:
+                from: not_submitted
+                to: submitted
+
+    FieldChange:
+      type: object
+      required: [from, to]
+      properties:
+        from: {}
+        to: {}
+
+    EventList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        next_cursor:
+          type: [string, "null"]
+          description: 下次请求传给 `after`。没有新事件时保持不变，为 `null` 表示事件流还是空的。

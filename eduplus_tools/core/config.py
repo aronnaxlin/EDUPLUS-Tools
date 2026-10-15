@@ -99,6 +99,7 @@ def load_config(
     output: str | None = None,
     timeout: int | None = None,
     require_config_file: bool = False,
+    require_course_id: bool = True,
 ) -> EduplusConfig:
     file_config, resolved_config_path = load_json_config_file(config_file)
     if require_config_file and (not resolved_config_path or not resolved_config_path.exists()):
@@ -149,7 +150,8 @@ def load_config(
         config_path=resolved_config_path if resolved_config_path and resolved_config_path.exists() else None,
     )
 
-    missing = [name for name in ("session", "course_id") if not getattr(config, name)]
+    required = ("session", "course_id") if require_course_id else ("session",)
+    missing = [name for name in required if not getattr(config, name)]
     if missing:
         joined = ", ".join(missing)
         raise SystemExit(f"Missing required config: {joined}. Fill config.json or pass command-line overrides.")

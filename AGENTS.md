@@ -4,8 +4,9 @@
 
 - `eduplus_tools/cli/main.py` is the unified command-line entry point.
 - `eduplus_tools/core/` contains configuration loading and the EDUPLUS HTTP client.
-- `eduplus_tools/features/` contains task implementations: `ppt.py` for courseware and `homework.py` for homework export.
-- `eduplus_tools/web/` contains the web server, job handling, and `static/` HTML/CSS/JS assets.
+- `eduplus_tools/features/` contains task implementations: `ppt.py` for courseware, `homework.py` for homework export, and `status.py` for fetching and normalizing homework/experiment status.
+- `eduplus_tools/monitor/` contains the status scanner: snapshot diffing into events, SQLite storage, and the scan scheduler.
+- `eduplus_tools/web/` contains the web server, job handling, the `/api/v1` status API (`status_api.py`, spec in `docs/openapi/status-api.yaml`), and `static/` HTML/CSS/JS assets.
 - `config.example.json` documents local configuration. Real `config.json` and generated `downloads/` output stay uncommitted.
 - `Dockerfile`, `docker-compose.yml`, and `start_webui.sh` support web UI deployment.
 
@@ -28,7 +29,7 @@ Prefer `snake_case` for functions, variables, CLI option destinations, and JSON-
 
 ## Testing Guidelines
 
-There is no committed automated test suite yet. For risky logic changes, add focused `pytest` tests under `tests/`, with names like `test_config.py` and `test_load_config_prefers_cli_values`. Until then, verify with smoke commands such as `ppt --dry-run`, `/api/health`, and a temporary output directory.
+Run `python3 -m pytest` from the repository root (`pytest.ini` puts the package on the path). For risky logic changes, add focused tests under `tests/`, with names like `test_config.py` and `test_load_config_prefers_cli_values`; status API tests share fakes in `tests/status_fixtures.py` and never call the real EDUPLUS. Also verify with smoke commands such as `ppt --dry-run`, `/api/health`, and a temporary output directory.
 
 ## Commit & Pull Request Guidelines
 
