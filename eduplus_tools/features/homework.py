@@ -448,7 +448,29 @@ def json_file_matches_status_mode(json_path: Path, status_mode: HomeworkStatusMo
     return homework_matches_status_mode(status_folder == "做过", status_mode)
 
 
-def scrape_homework(
+def filter_homeworks(
+    homeworks: list[dict[str, Any]],
+    *,
+    status_mode: HomeworkStatusMode = "all",
+    homework_query: str | None = None,
+) -> list[dict[str, Any]]:
+    selected = [
+        homework
+        for homework in homeworks
+        if homework_matches_status_mode(bool(homework.get("is_done")), status_mode)
+    ]
+    cleaned = (homework_query or "").strip().lower()
+    if not cleaned:
+        return selected
+    return [
+        homework
+        for homework in selected
+        if cleaned == str(homework.get("id") or "").lower()
+        or cleaned in str(homework.get("name") or "").lower()
+    ]
+
+
+def scrape_homework_detailed(
     client: EduplusClient,
     *,
     course_id: str,
@@ -456,8 +478,9 @@ def scrape_homework(
     convert_existing: bool = True,
     answer_mode: HomeworkAnswerMode = "plain",
     status_mode: HomeworkStatusMode = "all",
+    homework_query: str | None = None,
     log: Callable[[str], None] = print,
-) -> int:
+) -> dict[str, Any]:
     answer_mode = normalize_answer_mode(answer_mode)
     status_mode = normalize_status_mode(status_mode)
     json_dir = output_root / "homework" / "json"
@@ -471,7 +494,14 @@ def scrape_homework(
     homeworks = get_homework_list(client, course_id, log=log)
     if not homeworks:
         log("未找到作业，请检查 SESSION、课程 ID 或网络。")
-        return 1
+        return {
+            "exit_code": 1,
+            "course_id": course_id,
+            "total_count": 0,
+            "matched_count": 0,
+            "json_files": [],
+            "markdown_files": [],
+        }
 
     answer_mode_label = {"plain": "不带答案", "answers": "带答案", "both": "两者都要"}[answer_mode]
     log(f"作业答案导出：{answer_mode_label}")
@@ -479,13 +509,13 @@ def scrape_homework(
     done_count = sum(1 for homework in homeworks if homework.get("is_done"))
     undone_count = len(homeworks) - done_count
     log(f"找到 {len(homeworks)} 份作业：做过 {done_count} 份，没做过 {undone_count} 份。")
-    selected_homeworks = [homework for homework in homeworks if homework_matches_status_mode(bool(homework.get("is_done")), status_mode)]
+    selected_homeworks = filter_homeworks(homeworks, status_mode=status_mode, homework_query=homework_query)
     if len(selected_homeworks) != len(homeworks):
         log(f"本次将处理 {len(selected_homeworks)} 份符合范围的作业。")
     if not selected_homeworks:
         log("没有符合当前范围的作业。")
 
-    json_files = []
+    json_files: list[Path] = []
     for homework in selected_homeworks:
         log(f"\n正在处理作业：{homework['name']}（{homework.get('status_folder')}）")
         json_path = process_homework(
@@ -501,8 +531,9 @@ def scrape_homework(
         time.sleep(1)
 
     log("\n正在把 JSON 转成 Markdown...")
+    markdown_files: list[Path] = []
     for json_file in json_files:
-        convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log)
+        markdown_files.extend(convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log))
 
     if convert_existing:
         for json_file in json_dir.rglob("*.json"):
@@ -510,9 +541,40 @@ def scrape_homework(
                 if not json_file_matches_status_mode(json_file, status_mode):
                     continue
                 log(f"正在转换已有文件：{json_file.name}")
-                convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log)
+                markdown_files.extend(convert_to_md(json_file, md_dir, answer_mode=answer_mode, log=log))
 
     log("\n处理完成。")
     log(f"JSON 目录：{json_dir}")
     log(f"Markdown 目录：{md_dir}")
-    return 0
+    return {
+        "exit_code": 0,
+        "course_id": course_id,
+        "total_count": len(homeworks),
+        "matched_count": len(selected_homeworks),
+        "json_files": [str(path) for path in json_files],
+        "markdown_files": [str(path) for path in markdown_files],
+    }
+
+
+def scrape_homework(
+    client: EduplusClient,
+    *,
+    course_id: str,
+    output_root: Path,
+    convert_existing: bool = True,
+    answer_mode: HomeworkAnswerMode = "plain",
+    status_mode: HomeworkStatusMode = "all",
+    homework_query: str | None = None,
+    log: Callable[[str], None] = print,
+) -> int:
+    result = scrape_homework_detailed(
+        client,
+        course_id=course_id,
+        output_root=output_root,
+        convert_existing=convert_existing,
+        answer_mode=answer_mode,
+        status_mode=status_mode,
+        homework_query=homework_query,
+        log=log,
+    )
+    return int(result["exit_code"])

@@ -1,1 +1,1 @@
-# The unified CLI uses only the Python standard library.
+mcp>=2.0.0

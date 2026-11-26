@@ -194,7 +194,8 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
         output_root = _job_output_root(payload, job_id)
         requested_session = _string(payload.get("session"))
         config = load_config(
-            config_file="config.json" if execution_mode == "local" else None,
+            config_file="config.json",
+            use_server_defaults=execution_mode == "local",
             session=requested_session or None,
             course_id=_string(payload.get("course_id")),
             hm_lvt=_string(payload.get("hm_lvt")),
@@ -205,8 +206,10 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
         )
         client = EduplusClient(config, verbose=bool(payload.get("verbose")), log=log)
         output_root = Path(config.output)
-        session_source = "当前填写" if requested_session else ("服务端配置" if execution_mode == "local" else "当前填写")
+        session_source = "当前填写" if requested_session or execution_mode != "local" else "服务端配置"
         homework_status_mode = normalize_homework_status_mode(payload.get("homework_status_mode"))
+        keyword = _string(payload.get("keyword")) or None
+        homework_query = _string(payload.get("homework_query")) or None
 
         job_store.update(
             job_id,
@@ -239,6 +242,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                     output_root=output_root,
                     dry_run=bool(payload.get("dry_run")),
                     overwrite=bool(payload.get("overwrite")),
+                    keyword=keyword,
                     log=log,
                 ),
             )
@@ -253,6 +257,7 @@ def _run_job(job_store: JobStore, job_id: str, payload: dict[str, object]) -> No
                     convert_existing=not bool(payload.get("skip_existing_homework_convert")),
                     answer_mode=normalize_homework_answer_mode(payload.get("homework_answer_mode")),
                     status_mode=homework_status_mode,
+                    homework_query=homework_query,
                     log=log,
                 ),
             )

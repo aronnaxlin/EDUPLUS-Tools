@@ -8,15 +8,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..core.client import EduplusClient
-from ..core.config import load_config
+from ..core.config import load_config, mask_value
 from ..core.times import CHINA_TZ
-from ..features.homework import scrape_homework
-from ..features.ppt import download_ppt_files
+from ..features.homework import scrape_homework_detailed
+from ..features.ppt import download_ppt_detailed
 from ..features.status import (
     TASK_STATES,
     TASK_TYPES,
     SessionExpiredError,
     UpstreamError,
+    check_session,
     course_is_active,
     course_to_api,
     fetch_courses,
@@ -34,13 +35,17 @@ WEEKDAYS = "一二三四五六日"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Unified EDUPLUS courseware and homework tool.")
+    parser = argparse.ArgumentParser(description="Unified EDUPLUS courseware, homework, status, and MCP tool.")
     parser.add_argument(
         "command",
-        choices=["all", "ppt", "homework", "courses", "tasks"],
+        choices=["all", "ppt", "homework", "courses", "tasks", "session", "mcp"],
         nargs="?",
         default="all",
-        help="all/ppt/homework download one course (needs --course-id); courses lists your courses; tasks lists homework and experiment status across courses. Default: all",
+        help=(
+            "all/ppt/homework download one course (needs --course-id); "
+            "courses lists your courses; tasks lists homework and experiment status; "
+            "session verifies credentials; mcp starts the MCP server. Default: all"
+        ),
     )
     parser.add_argument("--config", "--config-file", dest="config", default="config.json", help="JSON config file. Default: config.json")
     parser.add_argument("--config-json", help='Optional JSON config, e.g. {"session":"...","course_id":"..."}')
@@ -53,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=None, help="HTTP timeout seconds")
     parser.add_argument("--dry-run", action="store_true", help="For ppt: list files and signed URLs without downloading")
     parser.add_argument("--overwrite", action="store_true", help="For ppt: overwrite existing files")
+    parser.add_argument("--keyword", default=None, help="For ppt: filter courseware by filename or chapter keyword")
+    parser.add_argument(
+        "--homework",
+        "--homework-query",
+        dest="homework_query",
+        default=None,
+        help="For homework: filter by homework ID or title substring",
+    )
     parser.add_argument(
         "--homework-answer-mode",
         choices=["plain", "answers", "both"],
@@ -67,13 +80,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--skip-existing-homework-convert", action="store_true", help="Only convert homework JSON fetched in this run")
     parser.add_argument("--verbose", action="store_true", help="Print extra request details")
-    status_group = parser.add_argument_group("courses / tasks")
-    status_group.add_argument("--json", action="store_true", help="Print machine-readable JSON (same task fields as the /api/v1 status API)")
+    status_group = parser.add_argument_group("courses / tasks / structured output")
+    status_group.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     status_group.add_argument("--state", action="append", choices=TASK_STATES, help="Only tasks in this state; repeatable")
     status_group.add_argument("--type", action="append", choices=TASK_TYPES, help="Only homework or experiment; repeatable")
     status_group.add_argument("--due-within", type=float, metavar="HOURS", help="Only tasks due within the next HOURS (excludes overdue)")
     status_group.add_argument("--overdue", action="store_true", help="Only unsubmitted tasks past their deadline")
     status_group.add_argument("--all-courses", action="store_true", help="Include courses that have already ended")
+
+    mcp_group = parser.add_argument_group("mcp")
+    mcp_group.add_argument("--host", default="127.0.0.1", help="MCP HTTP listen host. Default: 127.0.0.1")
+    mcp_group.add_argument("--port", type=int, default=8001, help="MCP HTTP listen port. Default: 8001")
+    mcp_group.add_argument("--mcp-path", default="/mcp", help="MCP HTTP route path. Default: /mcp")
+    mcp_group.add_argument(
+        "--transport",
+        choices=["streamable-http", "sse", "stdio"],
+        default="streamable-http",
+        help="MCP transport mode. Default: streamable-http",
+    )
     return parser
 
 
@@ -82,6 +106,46 @@ def format_due(due_at: str | None) -> str:
         return "无截止时间"
     due = datetime.fromisoformat(due_at)
     return f"{due:%m-%d} 周{WEEKDAYS[due.weekday()]} {due:%H:%M}"
+
+
+def run_session_command(args: argparse.Namespace) -> int:
+    try:
+        config = load_config(
+            config_file=args.config,
+            config_json=args.config_json,
+            session=args.session,
+            base_url=args.base_url,
+            timeout=args.timeout,
+            require_course_id=False,
+        )
+    except SystemExit as exc:
+        if args.json:
+            print(json.dumps({"valid": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+            return 2
+        raise
+
+    client = EduplusClient(config, verbose=args.verbose, log=lambda message: print(message, file=sys.stderr))
+    try:
+        result = check_session(client)
+    except UpstreamError as exc:
+        if args.json:
+            print(json.dumps({"valid": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"请求 EDUPLUS 失败：{exc}", file=sys.stderr)
+        return 1
+
+    payload = {
+        "valid": result.valid,
+        "upstream_code": result.upstream_code,
+        "session_masked": mask_value(config.session),
+        "config_path": str(config.config_path) if config.config_path else "",
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        status_text = "有效" if result.valid else "已失效"
+        print(f"登录态：{status_text}（code={result.upstream_code}, session={payload['session_masked']}）")
+    return 0 if result.valid else 2
 
 
 def run_status_command(args: argparse.Namespace) -> int:
@@ -154,8 +218,21 @@ def main() -> int:
             datetime.now(CHINA_TZ) + timedelta(hours=args.due_within)
         except (ValueError, OverflowError):
             parser.error("--due-within must be positive, finite hours within the supported datetime range")
+    if args.command == "mcp":
+        from ..mcp.server import run_mcp_server
+
+        return run_mcp_server(
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            path=args.mcp_path,
+            config_file=args.config,
+        )
+    if args.command == "session":
+        return run_session_command(args)
     if args.command in STATUS_COMMANDS:
         return run_status_command(args)
+
     config = load_config(
         config_file=args.config,
         config_json=args.config_json,
@@ -167,46 +244,59 @@ def main() -> int:
         output=args.output,
         timeout=args.timeout,
     )
-    client = EduplusClient(config, verbose=args.verbose)
+    log_fn = (lambda message: print(message, file=sys.stderr)) if args.json else print
+    client = EduplusClient(config, verbose=args.verbose, log=log_fn)
     output_root = Path(config.output)
 
-    print("=" * 60)
-    print("EDUPLUS Tools")
-    print("=" * 60)
-    if config.config_path:
-        print(f"Config: {config.config_path}")
-    print(f"Course ID: {config.course_id}")
-    print(f"Output: {output_root}")
-    print("=" * 60)
+    if not args.json:
+        print("=" * 60)
+        print("EDUPLUS Tools")
+        print("=" * 60)
+        if config.config_path:
+            print(f"Config: {config.config_path}")
+        print(f"Course ID: {config.course_id}")
+        print(f"Output: {output_root}")
+        print("=" * 60)
 
     status = 0
+    summary_payload: dict[str, object] = {
+        "course_id": config.course_id,
+        "output": str(output_root),
+    }
+
     if args.command in {"all", "ppt"}:
-        status = max(
-            status,
-            download_ppt_files(
-                client,
-                course_id=config.course_id,
-                course_name=config.course_name,
-                output_root=output_root,
-                dry_run=args.dry_run,
-                overwrite=args.overwrite,
-            ),
+        ppt_result = download_ppt_detailed(
+            client,
+            course_id=config.course_id,
+            course_name=config.course_name,
+            output_root=output_root,
+            dry_run=args.dry_run,
+            overwrite=args.overwrite,
+            keyword=args.keyword,
+            log=log_fn,
         )
+        status = max(status, int(ppt_result["exit_code"]))
+        summary_payload["ppt"] = ppt_result
 
     if args.command in {"all", "homework"} and not args.dry_run:
-        status = max(
-            status,
-            scrape_homework(
-                client,
-                course_id=config.course_id,
-                output_root=output_root,
-                convert_existing=not args.skip_existing_homework_convert,
-                answer_mode=args.homework_answer_mode,
-                status_mode=args.homework_status_mode,
-            ),
+        homework_result = scrape_homework_detailed(
+            client,
+            course_id=config.course_id,
+            output_root=output_root,
+            convert_existing=not args.skip_existing_homework_convert,
+            answer_mode=args.homework_answer_mode,
+            status_mode=args.homework_status_mode,
+            homework_query=args.homework_query,
+            log=log_fn,
         )
+        status = max(status, int(homework_result["exit_code"]))
+        summary_payload["homework"] = homework_result
     elif args.command == "all" and args.dry_run:
-        print("Skipping homework because --dry-run only applies to ppt downloads.")
+        log_fn("Skipping homework because --dry-run only applies to ppt downloads.")
+
+    if args.json:
+        summary_payload["exit_code"] = status
+        print(json.dumps(summary_payload, ensure_ascii=False, indent=2))
 
     return status
 

@@ -4,12 +4,14 @@ services:
     container_name: eduplus-web
     init: true
     ports:
-      - "${PORT:-8000}:8000"
+      # Bound to loopback by default: reach it via a tunnel/reverse proxy on this host.
+      # Set EDUPLUS_BIND=0.0.0.0 only if the port must be reachable from other machines.
+      - "${EDUPLUS_BIND:-127.0.0.1}:${PORT:-8000}:8000"
     environment:
       HOST: 0.0.0.0
       PORT: 8000
-      EDUPLUS_ENABLE_LOCAL_OUTPUT: ${EDUPLUS_ENABLE_LOCAL_OUTPUT:-false}
-      EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS: ${EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS:-true}
+      EDUPLUS_ENABLE_LOCAL_OUTPUT: ${EDUPLUS_ENABLE_LOCAL_OUTPUT:-true}
+      EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS: ${EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS:-false}
       EDUPLUS_PUBLIC_JOB_TTL_SECONDS: ${EDUPLUS_PUBLIC_JOB_TTL_SECONDS:-1800}
       EDUPLUS_CLEANUP_INTERVAL_SECONDS: ${EDUPLUS_CLEANUP_INTERVAL_SECONDS:-60}
       EDUPLUS_PUBLIC_OUTPUT_ROOT: ${EDUPLUS_PUBLIC_OUTPUT_ROOT:-downloads/web-jobs}
@@ -19,8 +21,15 @@ services:
       EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS: ${EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS:-600}
       EDUPLUS_STATUS_DB: ${EDUPLUS_STATUS_DB:-downloads/status/status.sqlite3}
       EDUPLUS_SESSION: ${EDUPLUS_SESSION:-}
+      EDUPLUS_MCP_ENABLED: ${EDUPLUS_MCP_ENABLED:-true}
+      EDUPLUS_MCP_PATH: ${EDUPLUS_MCP_PATH:-/mcp}
+      EDUPLUS_MCP_TOKEN: ${EDUPLUS_MCP_TOKEN:-}
+      EDUPLUS_MCP_ALLOW_NO_AUTH: ${EDUPLUS_MCP_ALLOW_NO_AUTH:-false}
+      EDUPLUS_MCP_ALLOWED_HOSTS: ${EDUPLUS_MCP_ALLOWED_HOSTS:-}
+      EDUPLUS_DATA_DIR: data
     volumes:
       - ./downloads:/app/downloads
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import os, sys, urllib.request; port=os.getenv('PORT', '8000'); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=3); sys.exit(0)"]
       interval: 30s

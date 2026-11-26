@@ -3,6 +3,7 @@ config.json
 docker-compose.override.yml
 HANDOFF.md
 downloads/
+data/
 __pycache__/
 *.pyc
 .DS_Store

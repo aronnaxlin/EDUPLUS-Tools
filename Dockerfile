@@ -4,13 +4,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
-    EDUPLUS_ENABLE_LOCAL_OUTPUT=false \
-    EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS=true \
+    EDUPLUS_ENABLE_LOCAL_OUTPUT=true \
+    EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS=false \
     EDUPLUS_PUBLIC_JOB_TTL_SECONDS=1800 \
     EDUPLUS_CLEANUP_INTERVAL_SECONDS=60 \
     EDUPLUS_PUBLIC_OUTPUT_ROOT=downloads/web-jobs \
     EDUPLUS_BUNDLE_ROOT=downloads/web-bundles \
-    EDUPLUS_LOCAL_OUTPUT_ROOT=downloads
+    EDUPLUS_LOCAL_OUTPUT_ROOT=downloads \
+    EDUPLUS_MCP_ENABLED=true \
+    EDUPLUS_MCP_PATH=/mcp \
+    EDUPLUS_DATA_DIR=data
 
 WORKDIR /app
 
@@ -21,7 +24,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 RUN useradd --create-home --shell /bin/bash appuser && \
-    mkdir -p /app/downloads/web-jobs /app/downloads/web-bundles /app/downloads && \
+    mkdir -p /app/downloads/web-jobs /app/downloads/web-bundles /app/downloads/status /app/data && \
     chown -R appuser:appuser /app
 
 USER appuser

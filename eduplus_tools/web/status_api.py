@@ -106,15 +106,23 @@ class StatusApi:
         self._monitor = monitor
         self._token = token
 
-    def handle(self, handler: JsonResponder, method: str, parsed: ParseResult, authorization: str | None) -> None:
+    def evaluate(
+        self,
+        method: str,
+        parsed: ParseResult,
+        authorization: str | None,
+    ) -> tuple[dict[str, Any], HTTPStatus, dict[str, str] | None]:
         try:
             self._authorize(authorization)
             payload, status = self._route(method, parsed)
+            return payload, status, None
         except ApiError as exc:
             headers = {"WWW-Authenticate": "Bearer"} if exc.status == HTTPStatus.UNAUTHORIZED else None
-            handler._send_json({"error": exc.message, "code": exc.code}, status=exc.status, headers=headers)
-            return
-        handler._send_json(payload, status=status)
+            return {"error": exc.message, "code": exc.code}, exc.status, headers
+
+    def handle(self, handler: JsonResponder, method: str, parsed: ParseResult, authorization: str | None) -> None:
+        payload, status, headers = self.evaluate(method, parsed, authorization)
+        handler._send_json(payload, status=status, headers=headers)
 
     def _authorize(self, authorization: str | None) -> None:
         scheme, _, token = (authorization or "").partition(" ")

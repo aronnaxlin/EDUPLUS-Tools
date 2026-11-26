@@ -5,7 +5,7 @@ import time
 import urllib.error
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,17 @@ def collect_courseware(client: EduplusClient, course_id: str) -> list[Courseware
     for file in files:
         deduped[file.attachment_id] = file
     return list(deduped.values())
+
+
+def filter_courseware(files: list[Courseware], keyword: str | None = None) -> list[Courseware]:
+    cleaned = (keyword or "").strip().lower()
+    if not cleaned:
+        return list(files)
+    return [
+        file
+        for file in files
+        if cleaned in file.name.lower() or cleaned in file.chapter.lower() or cleaned == file.attachment_id.lower()
+    ]
 
 
 def get_course_name(client: EduplusClient, course_id: str, log: Callable[[str], None] = print) -> str | None:
@@ -130,6 +141,30 @@ def attach_signed_urls(
     return enriched
 
 
+def inspect_courseware(
+    client: EduplusClient,
+    *,
+    course_id: str,
+    course_name: str | None = None,
+    keyword: str | None = None,
+    include_urls: bool = True,
+    log: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """List courseware for a course, optionally filtering by keyword and attaching signed URLs."""
+    detected_course_name = course_name or get_course_name(client, course_id, log=log) or ""
+    all_files = collect_courseware(client, course_id)
+    selected = filter_courseware(all_files, keyword)
+    if include_urls and selected:
+        selected = attach_signed_urls(client, course_id, selected, log=log)
+    return {
+        "course_id": course_id,
+        "course_name": detected_course_name,
+        "total_count": len(all_files),
+        "matched_count": len(selected),
+        "items": [asdict(item) for item in selected],
+    }
+
+
 def course_output_dir(base_output_dir: Path, course_id: str, course_name: str | None) -> Path:
     ppt_root = base_output_dir / "courseware"
     if course_name:
@@ -155,7 +190,7 @@ def looks_like_presentation(data: bytes, filename: str) -> bool:
     return data.startswith(b"PK\x03\x04") or data.startswith(b"\xd0\xcf\x11\xe0")
 
 
-def download_ppt_files(
+def download_ppt_detailed(
     client: EduplusClient,
     *,
     course_id: str,
@@ -163,14 +198,26 @@ def download_ppt_files(
     output_root: Path,
     dry_run: bool = False,
     overwrite: bool = False,
+    keyword: str | None = None,
     log: Callable[[str], None] = print,
-) -> int:
+) -> dict[str, Any]:
+    """Inspect and optionally download PPT/PPTX courseware, returning structured results."""
     detected_course_name = course_name or get_course_name(client, course_id, log=log)
     output_dir = course_output_dir(output_root, course_id, detected_course_name)
-    files = collect_courseware(client, course_id)
+    all_files = collect_courseware(client, course_id)
+    files = filter_courseware(all_files, keyword)
     if not files:
-        log("未找到 PPT/PPTX 课件。")
-        return 0
+        log("未找到匹配的 PPT/PPTX 课件。" if keyword else "未找到 PPT/PPTX 课件。")
+        return {
+            "exit_code": 0,
+            "course_id": course_id,
+            "course_name": detected_course_name or "",
+            "output_dir": str(output_dir),
+            "dry_run": dry_run,
+            "items": [],
+            "downloaded_files": [],
+            "failed": [],
+        }
 
     files = attach_signed_urls(client, course_id, files, log=log)
     log(f"找到 {len(files)} 个 PPT/PPTX 文件。")
@@ -178,17 +225,27 @@ def download_ppt_files(
         log(f"课程名称：{detected_course_name}")
     log(f"输出目录：{output_dir}")
 
+    items = [asdict(file) for file in files]
     if dry_run:
         for file in files:
             size = f" ({file.size_mb} MB)" if file.size_mb is not None else ""
             log(f"{file.name}{size}")
             log(f"  附件 ID：{file.attachment_id}")
             log(f"  下载链接：{file.signed_url}")
-        return 0
+        return {
+            "exit_code": 0,
+            "course_id": course_id,
+            "course_name": detected_course_name or "",
+            "output_dir": str(output_dir),
+            "dry_run": True,
+            "items": items,
+            "downloaded_files": [],
+            "failed": [],
+        }
 
     referer = course_referer(client.base_url, course_id)
-    ok = 0
-    failed = 0
+    downloaded_files: list[dict[str, Any]] = []
+    failed: list[dict[str, str]] = []
     for index, file in enumerate(files, start=1):
         filename = safe_filename(file.name, "courseware.ppt")
         if not re.search(r"\.pptx?$", filename, re.I):
@@ -203,11 +260,52 @@ def download_ppt_files(
             if not looks_like_presentation(data, final_path.name):
                 raise RuntimeError("返回内容不是有效的 PPT/PPTX 文件")
             final_path.write_bytes(data)
-            ok += 1
+            downloaded_files.append(
+                {
+                    "attachment_id": file.attachment_id,
+                    "name": file.name,
+                    "chapter": file.chapter,
+                    "path": str(final_path),
+                    "size_bytes": len(data),
+                }
+            )
             log(f"[{index}/{len(files)}] 已下载 {final_path}（{len(data)} 字节）")
         except (urllib.error.URLError, RuntimeError, OSError) as exc:
-            failed += 1
+            failed.append({"attachment_id": file.attachment_id, "name": file.name, "error": str(exc)})
             log(f"[{index}/{len(files)}] 下载失败 {file.name}：{exc}")
 
-    log(f"完成。成功 {ok} 个，失败 {failed} 个。")
-    return 1 if failed else 0
+    log(f"完成。成功 {len(downloaded_files)} 个，失败 {len(failed)} 个。")
+    return {
+        "exit_code": 1 if failed else 0,
+        "course_id": course_id,
+        "course_name": detected_course_name or "",
+        "output_dir": str(output_dir),
+        "dry_run": False,
+        "items": items,
+        "downloaded_files": downloaded_files,
+        "failed": failed,
+    }
+
+
+def download_ppt_files(
+    client: EduplusClient,
+    *,
+    course_id: str,
+    course_name: str | None,
+    output_root: Path,
+    dry_run: bool = False,
+    overwrite: bool = False,
+    keyword: str | None = None,
+    log: Callable[[str], None] = print,
+) -> int:
+    result = download_ppt_detailed(
+        client,
+        course_id=course_id,
+        course_name=course_name,
+        output_root=output_root,
+        dry_run=dry_run,
+        overwrite=overwrite,
+        keyword=keyword,
+        log=log,
+    )
+    return int(result["exit_code"])

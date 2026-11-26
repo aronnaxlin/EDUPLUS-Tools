@@ -4,6 +4,7 @@
 .codex/
 .playwright-mcp/
 downloads/
+data/
 __pycache__/
 *.pyc
 *.pyo
