@@ -90,6 +90,8 @@ docker compose up -d --build
 
 compose 默认只把端口绑定到宿主机的 `127.0.0.1`，外部经同一台机器上的 Tunnel 或反向代理访问。确实需要局域网直连时，设置 `EDUPLUS_BIND=0.0.0.0`。
 
+**公网部署请关闭网页界面**：设置 `EDUPLUS_WEB_UI_ENABLED=false`。网页界面没有登录，本地模式又会使用服务端的 SESSION，暴露在公网上等于把你的账号交给任何知道地址的人。关闭后只保留 `/api/health`、`/api/v1`（状态 API，需要 `EDUPLUS_STATUS_TOKEN`）和 `/mcp`（需要 MCP token）。用 Tunnel 暴露时，建议在路由上限定路径 `^/mcp`，只公开 MCP。
+
 Docker 与 Web 服务默认全面开放本地输出与服务端配置能力：
 - `EDUPLUS_ENABLE_LOCAL_OUTPUT=true`：默认允许本地输出模式落盘到 `downloads/`
 - `EDUPLUS_AUTO_DELETE_PUBLIC_DOWNLOADS=false`：默认保留任务下载文件（仍可按 `EDUPLUS_PUBLIC_JOB_TTL_SECONDS` 控制清理）

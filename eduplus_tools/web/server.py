@@ -67,6 +67,7 @@ class WebServerConfig:
     mcp_token: str = ""
     mcp_allowed_hosts: str = ""
     mcp_allow_no_auth: bool = False
+    web_ui_enabled: bool = True
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -107,6 +108,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--status-scan-interval-seconds", type=int, default=env_int("EDUPLUS_STATUS_SCAN_INTERVAL_SECONDS", 600), help="状态检测扫描间隔，最少 60 秒")
     parser.add_argument("--status-config", default=os.getenv("EDUPLUS_STATUS_CONFIG", "config.json"), help="状态检测与 MCP 读取 SESSION 的配置文件")
     parser.add_argument(
+        "--web-ui",
+        dest="web_ui_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("EDUPLUS_WEB_UI_ENABLED", True),
+        help="是否提供网页界面及其任务接口（/、/static、/api/config、/api/run、/api/jobs）；公网部署建议关闭，只保留 MCP 与状态 API",
+    )
+    parser.add_argument(
         "--mcp-enabled",
         action=argparse.BooleanOptionalAction,
         default=env_bool("EDUPLUS_MCP_ENABLED", True),
@@ -145,6 +153,7 @@ def load_server_config(args: argparse.Namespace) -> WebServerConfig:
         mcp_token=str(args.mcp_token or "").strip(),
         mcp_allowed_hosts=str(args.mcp_allowed_hosts or "").strip(),
         mcp_allow_no_auth=bool(args.mcp_allow_no_auth),
+        web_ui_enabled=bool(args.web_ui_enabled),
     )
 
 
@@ -284,6 +293,7 @@ class WebHandler(BaseHTTPRequestHandler):
 def _health_payload() -> dict[str, object]:
     return {
         "ok": True,
+        "web_ui_enabled": SERVER_CONFIG.web_ui_enabled if SERVER_CONFIG else True,
         "mcp_enabled": SERVER_CONFIG.mcp_enabled if SERVER_CONFIG else True,
         "mcp_path": SERVER_CONFIG.mcp_path if SERVER_CONFIG else "/mcp",
     }
@@ -427,16 +437,21 @@ def create_asgi_app(
         return JSONResponse(payload, status_code=status, headers=headers)
 
     routes: list[Route] = [
-        Route("/", home, methods=["GET"]),
         Route("/api/health", health, methods=["GET"]),
-        Route("/api/config", get_config, methods=["GET"]),
-        Route("/api/run", run_job, methods=["POST"]),
-        Route("/api/jobs/{job_id}", job_detail, methods=["GET"]),
-        Route("/api/jobs/{job_id}/artifacts", job_artifacts, methods=["GET"]),
-        Route("/api/jobs/{job_id}/bundle.zip", job_bundle, methods=["GET"]),
-        Route("/static/{path:path}", static_asset, methods=["GET"]),
         Route("/api/v1/{path:path}", status_api_endpoint, methods=["GET", "POST"]),
     ]
+    if active_config.web_ui_enabled:
+        # The web UI has no login of its own and its local mode runs jobs with the server
+        # session, so deployments reachable from the internet turn it off.
+        routes += [
+            Route("/", home, methods=["GET"]),
+            Route("/api/config", get_config, methods=["GET"]),
+            Route("/api/run", run_job, methods=["POST"]),
+            Route("/api/jobs/{job_id}", job_detail, methods=["GET"]),
+            Route("/api/jobs/{job_id}/artifacts", job_artifacts, methods=["GET"]),
+            Route("/api/jobs/{job_id}/bundle.zip", job_bundle, methods=["GET"]),
+            Route("/static/{path:path}", static_asset, methods=["GET"]),
+        ]
 
     mcp_server = None
     if active_config.mcp_enabled:
@@ -514,8 +529,11 @@ def main() -> int:
     STATUS_API = build_status_api(SERVER_CONFIG, STATUS_MONITOR)
     app = create_asgi_app(SERVER_CONFIG, start_background_tasks=True)
 
-    print(f"EDUPLUS 网页界面已启动：http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
-    print(f"本地输出模式：{'已开启' if SERVER_CONFIG.enable_local_output else '未开启'}")
+    print(f"EDUPLUS 服务已启动：http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}")
+    if SERVER_CONFIG.web_ui_enabled:
+        print(f"网页界面：已开启；本地输出模式：{'已开启' if SERVER_CONFIG.enable_local_output else '未开启'}")
+    else:
+        print("网页界面：未开启（仅提供 /api/health、/api/v1 与 MCP）")
     print(f"状态检测 API：{f'已开启，每 {SERVER_CONFIG.status_scan_interval_seconds} 秒扫描一次' if STATUS_API else '未开启（后台扫描已就绪）'}")
     if SERVER_CONFIG.mcp_enabled:
         print(f"MCP Streamable HTTP：http://{SERVER_CONFIG.host}:{SERVER_CONFIG.port}{SERVER_CONFIG.mcp_path}")

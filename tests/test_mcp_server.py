@@ -342,6 +342,39 @@ async def test_mcp_tools_end_to_end_courseware_homework_and_downloads(monkeypatc
         await call_data("read_download", {"relative_path": "../../etc/passwd"})
 
 
+def test_disabling_web_ui_keeps_only_health_status_api_and_mcp(monkeypatch, tmp_path) -> None:
+    cfg = server.WebServerConfig(
+        host="127.0.0.1",
+        port=8000,
+        enable_local_output=True,
+        auto_delete_public_downloads=False,
+        public_job_ttl_seconds=1800,
+        cleanup_interval_seconds=60,
+        public_output_root=tmp_path / "web-jobs",
+        bundle_root=tmp_path / "web-bundles",
+        local_output_root=tmp_path / "downloads",
+        status_token="",
+        status_db=tmp_path / "status.sqlite3",
+        status_scan_interval_seconds=600,
+        status_config=str(tmp_path / "config.json"),
+        mcp_token="mcp-secret",
+        web_ui_enabled=False,
+    )
+    monkeypatch.setattr(server, "SERVER_CONFIG", cfg)
+    app = server.create_asgi_app(cfg, start_background_tasks=False)
+    with TestClient(app) as client:
+        assert client.get("/api/health").json()["web_ui_enabled"] is False
+        for path in ("/", "/api/config", "/static/app.js", "/api/jobs/x"):
+            assert client.get(path).status_code == 404, path
+        assert client.post("/api/run", json={"command": "ppt", "execution_mode": "local"}).status_code == 404
+        ok = _mcp_post(
+            client,
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            headers={"Authorization": "Bearer mcp-secret"},
+        )
+        assert ok.status_code == 200
+
+
 @pytest.mark.anyio
 async def test_mcp_file_tools_hide_server_internal_directories(tmp_path) -> None:
     downloads_root = tmp_path / "downloads"
