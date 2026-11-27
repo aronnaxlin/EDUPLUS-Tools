@@ -125,8 +125,8 @@ python3 -m eduplus_tools.mcp --host 127.0.0.1 --port 8001 --path /mcp
 | `configure_session` | 在线更新服务端 `session`（AccessToken）和默认 `course_id`，并保存到数据目录的 `credentials.json`（重启后仍有效） |
 | `list_courses` | 列出课程及其 `course_id`、学期与开结课状态（支持 `all_courses=true`） |
 | `list_tasks` | 查询各课程作业和实验的提交状态、截止时间、逾期情况 |
-| `list_courseware` | 检索某门课的 PPT/PPTX 课件章节、文件名、大小及签名下载链接（支持 `keyword` 筛选，无需先下载） |
-| `download_courseware` | 将全部或指定 `keyword` 匹配的 PPT/PPTX 课件下载到容器 `downloads/courseware/` |
+| `list_courseware` | 检索某门课的课件章节、文件名、大小及签名下载链接（默认 PPT/PPTX，`file_types` 可指定 `pdf` 等或 `*` 表示全部；支持 `keyword` 筛选；无匹配时 `other_file_types` 列出章节树里的其他资源类型） |
+| `download_courseware` | 将全部或指定 `keyword` 匹配的课件（默认 PPT/PPTX，`file_types` 同上）下载到容器 `downloads/courseware/` |
 | `fetch_homework` | 抓取指定课程（或 `homework_query` 匹配）的作业，保存 JSON/Markdown 并**直接返回 Markdown 正文** |
 | `list_downloads` | 浏览服务端 `downloads/` 中已保存的文件列表 |
 | `read_download` | 直接读取服务端 `downloads/` 下的 Markdown/JSON 文本内容 |
@@ -259,6 +259,9 @@ python3 -m eduplus_tools ppt --course-id "课程 ID" --keyword "第3章" --dry-r
 
 # 下载全部或指定关键词的课件
 python3 -m eduplus_tools ppt --course-id "课程 ID" --keyword "第3章"
+
+# 课件是 PDF 等其他格式时，用 --file-types 指定（"*" 表示全部附件）
+python3 -m eduplus_tools ppt --course-id "课程 ID" --file-types pdf,pptx --dry-run
 
 # 抓取作业并转换 Markdown（支持 --homework 按名称或 ID 过滤，支持 --json）
 python3 -m eduplus_tools homework --course-id "课程 ID" --homework "第一次作业" --homework-status-mode undone --homework-answer-mode both --json

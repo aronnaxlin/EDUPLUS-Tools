@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overwrite", action="store_true", help="For ppt: overwrite existing files")
     parser.add_argument("--keyword", default=None, help="For ppt: filter courseware by filename or chapter keyword")
     parser.add_argument(
+        "--file-types",
+        default=None,
+        help='For ppt: comma-separated attachment types to include, e.g. "pdf,pptx" or "*" (default: ppt,pptx)',
+    )
+    parser.add_argument(
         "--homework",
         "--homework-query",
         dest="homework_query",
@@ -273,6 +278,7 @@ def main() -> int:
             dry_run=args.dry_run,
             overwrite=args.overwrite,
             keyword=args.keyword,
+            file_types=args.file_types,
             log=log_fn,
         )
         status = max(status, int(ppt_result["exit_code"]))

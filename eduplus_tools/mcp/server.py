@@ -192,12 +192,12 @@ def create_mcp_server(
         title="EDUPLUS Tools MCP Server",
         description=(
             "Query EDUPLUS (U+) courses, homework and experiment deadlines, "
-            "search and download PPT/PPTX courseware, fetch homework questions/answers, "
+            "search and download courseware (PPT/PPTX by default, PDF and other attachments via file_types), fetch homework questions/answers, "
             "and inspect downloaded files."
         ),
         instructions=(
             "Use list_courses first to discover course IDs when the user refers to a course by name. "
-            "Use list_tasks for deadlines and submission status, list_courseware / download_courseware for PPT slides, "
+            "Use list_tasks for deadlines and submission status, list_courseware / download_courseware for slides and other courseware files, "
             "and fetch_homework to export and read homework Markdown directly."
         ),
     )
@@ -367,8 +367,13 @@ def create_mcp_server(
         course_id: str,
         keyword: str | None = None,
         include_urls: bool = True,
+        file_types: list[str] | str | None = None,
     ) -> dict[str, Any]:
-        """List PPT/PPTX courseware for a course without downloading files, optionally returning signed URLs."""
+        """List courseware for a course without downloading files, optionally returning signed URLs.
+
+        file_types defaults to ["ppt", "pptx"]; pass e.g. ["pdf"] or "pdf,pptx", or "*" for every attachment.
+        When nothing matches, other_file_types counts the other attachment types found in the chapter tree.
+        """
         cleaned_course_id = course_id.strip()
         if not cleaned_course_id:
             raise ValueError("course_id must not be empty")
@@ -381,6 +386,7 @@ def create_mcp_server(
                 course_id=cleaned_course_id,
                 keyword=keyword,
                 include_urls=include_urls,
+                file_types=file_types,
                 log=logs.append,
             )
             payload["logs"] = logs
@@ -394,8 +400,12 @@ def create_mcp_server(
         keyword: str | None = None,
         overwrite: bool = False,
         output_dir: str | None = None,
+        file_types: list[str] | str | None = None,
     ) -> dict[str, Any]:
-        """Download PPT/PPTX courseware files for a course into the server downloads directory."""
+        """Download courseware files for a course into the server downloads directory.
+
+        file_types defaults to ["ppt", "pptx"]; pass e.g. ["pdf"] or "*" for every attachment type.
+        """
         cleaned_course_id = course_id.strip()
         if not cleaned_course_id:
             raise ValueError("course_id must not be empty")
@@ -412,6 +422,7 @@ def create_mcp_server(
                 dry_run=False,
                 overwrite=overwrite,
                 keyword=keyword,
+                file_types=file_types,
                 log=logs.append,
             )
             base = resolved_downloads_root.resolve()

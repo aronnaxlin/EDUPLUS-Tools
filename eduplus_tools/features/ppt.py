@@ -24,7 +24,42 @@ class Courseware:
     signed_url: str | None = None
 
 
-def collect_courseware(client: EduplusClient, course_id: str) -> list[Courseware]:
+DEFAULT_FILE_TYPES: tuple[str, ...] = ("ppt", "pptx")
+ALL_FILE_TYPES = "*"
+
+
+def normalize_file_types(file_types: str | list[str] | tuple[str, ...] | None) -> frozenset[str] | None:
+    """Turn user input like "pdf,pptx" or ["PDF"] into a suffix set; None means every type."""
+    if file_types is None:
+        return frozenset(DEFAULT_FILE_TYPES)
+    raw = file_types.split(",") if isinstance(file_types, str) else list(file_types)
+    cleaned = {str(item).strip().lower().lstrip(".") for item in raw}
+    cleaned.discard("")
+    if not cleaned:
+        return frozenset(DEFAULT_FILE_TYPES)
+    if ALL_FILE_TYPES in cleaned or "all" in cleaned:
+        return None
+    return frozenset(cleaned)
+
+
+def describe_file_types(types: frozenset[str] | None) -> str:
+    return "全部类型" if types is None else "/".join(sorted(t.upper() for t in types))
+
+
+def collect_courseware(
+    client: EduplusClient,
+    course_id: str,
+    file_types: frozenset[str] | None = frozenset(DEFAULT_FILE_TYPES),
+) -> list[Courseware]:
+    return collect_courseware_detailed(client, course_id, file_types)[0]
+
+
+def collect_courseware_detailed(
+    client: EduplusClient,
+    course_id: str,
+    file_types: frozenset[str] | None = frozenset(DEFAULT_FILE_TYPES),
+) -> tuple[list[Courseware], dict[str, int]]:
+    """Return matching files plus a count of the other file types found in the chapter tree."""
     referer = course_referer(client.base_url, course_id)
     path = f"/api/course/chapters/tree_list?courseId={urllib.parse.quote(course_id)}"
     tree = client.api_json(path, referer)
@@ -32,11 +67,12 @@ def collect_courseware(client: EduplusClient, course_id: str) -> list[Courseware
         raise RuntimeError(f"获取章节树失败：{tree.get('message') or tree}")
 
     files: list[Courseware] = []
-    walk_chapters(tree.get("data") or [], chapter="", output=files)
+    skipped: dict[str, int] = {}
+    walk_chapters(tree.get("data") or [], chapter="", output=files, file_types=file_types, skipped=skipped)
     deduped: dict[str, Courseware] = {}
     for file in files:
         deduped[file.attachment_id] = file
-    return list(deduped.values())
+    return list(deduped.values()), dict(sorted(skipped.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def filter_courseware(files: list[Courseware], keyword: str | None = None) -> list[Courseware]:
@@ -71,41 +107,58 @@ def get_course_name(client: EduplusClient, course_id: str, log: Callable[[str], 
     return None
 
 
-def walk_chapters(nodes: list[dict[str, Any]], chapter: str, output: list[Courseware]) -> None:
+def walk_chapters(
+    nodes: list[dict[str, Any]],
+    chapter: str,
+    output: list[Courseware],
+    file_types: frozenset[str] | None = frozenset(DEFAULT_FILE_TYPES),
+    skipped: dict[str, int] | None = None,
+) -> None:
     for node in nodes:
         node_name = str(node.get("name") or "")
         node_type = str(node.get("type") or "")
-        suffix = str(node.get("fileSuffix") or "").lower()
         current_chapter = node_name if node_type.lower() == "chapter" else chapter
 
-        if is_ppt_node(node):
-            attachment_id = str(node.get("resourceId") or "")
-            if attachment_id:
+        suffix = node_suffix(node)
+        attachment_id = str(node.get("resourceId") or "")
+        if node_type.lower() != "chapter" and (attachment_id or suffix):
+            if attachment_id and suffix and (file_types is None or suffix in file_types):
                 output.append(
                     Courseware(
                         node_id=str(node.get("id") or ""),
                         attachment_id=attachment_id,
-                        name=node_name or f"{attachment_id}.{suffix or 'ppt'}",
-                        suffix=suffix or suffix_from_name(node_name),
+                        name=node_name or f"{attachment_id}.{suffix}",
+                        suffix=suffix,
                         chapter=chapter,
                         size_mb=float(node["fileSize"]) if isinstance(node.get("fileSize"), (int, float)) else None,
                     )
                 )
+            elif skipped is not None:
+                key = suffix or f"type:{node_type or 'unknown'}"
+                skipped[key] = skipped.get(key, 0) + 1
 
         children = node.get("children") or []
         if isinstance(children, list):
-            walk_chapters(children, current_chapter, output)
+            walk_chapters(children, current_chapter, output, file_types, skipped)
+
+
+def node_suffix(node: dict[str, Any]) -> str:
+    """Best-effort file extension of a chapter-tree node: fileSuffix, then the name, then a ppt node type."""
+    suffix = str(node.get("fileSuffix") or "").strip().lower().lstrip(".")
+    if suffix:
+        return suffix
+    match = re.search(r"\.([A-Za-z0-9]{1,5})$", str(node.get("name") or ""))
+    if match:
+        return match.group(1).lower()
+    return "ppt" if str(node.get("type") or "").lower() == "ppt" else ""
 
 
 def is_ppt_node(node: dict[str, Any]) -> bool:
-    node_type = str(node.get("type") or "")
-    suffix = str(node.get("fileSuffix") or "")
-    name = str(node.get("name") or "")
-    return node_type.lower() == "ppt" or suffix.lower() in {"ppt", "pptx"} or bool(re.search(r"\.pptx?$", name, re.I))
+    return node_suffix(node) in DEFAULT_FILE_TYPES
 
 
 def suffix_from_name(name: str) -> str:
-    match = re.search(r"\.(pptx?)$", name, re.I)
+    match = re.search(r"\.([A-Za-z0-9]{1,5})$", name)
     return match.group(1).lower() if match else "ppt"
 
 
@@ -148,21 +201,37 @@ def inspect_courseware(
     course_name: str | None = None,
     keyword: str | None = None,
     include_urls: bool = True,
+    file_types: str | list[str] | tuple[str, ...] | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """List courseware for a course, optionally filtering by keyword and attaching signed URLs."""
+    types = normalize_file_types(file_types)
     detected_course_name = course_name or get_course_name(client, course_id, log=log) or ""
-    all_files = collect_courseware(client, course_id)
+    all_files, other_types = collect_courseware_detailed(client, course_id, types)
     selected = filter_courseware(all_files, keyword)
     if include_urls and selected:
         selected = attach_signed_urls(client, course_id, selected, log=log)
+    if not all_files:
+        log(not_found_message(types, other_types))
     return {
         "course_id": course_id,
         "course_name": detected_course_name,
+        "file_types": "*" if types is None else sorted(types),
         "total_count": len(all_files),
         "matched_count": len(selected),
+        "other_file_types": other_types,
         "items": [asdict(item) for item in selected],
     }
+
+
+def not_found_message(types: frozenset[str] | None, other_types: dict[str, int]) -> str:
+    message = f"未找到 {describe_file_types(types)} 课件。"
+    if other_types:
+        listed = "、".join(f"{key}×{count}" for key, count in other_types.items())
+        message += f"章节树里有其他类型的资源：{listed}；可用 file_types 指定（如 pdf，或 * 表示全部）。"
+    else:
+        message += "章节树里没有任何附件资源。"
+    return message
 
 
 def course_output_dir(base_output_dir: Path, course_id: str, course_name: str | None) -> Path:
@@ -190,6 +259,16 @@ def looks_like_presentation(data: bytes, filename: str) -> bool:
     return data.startswith(b"PK\x03\x04") or data.startswith(b"\xd0\xcf\x11\xe0")
 
 
+def looks_like_valid_download(data: bytes, filename: str) -> bool:
+    """Reject HTML/JSON error pages that a CDN sometimes returns instead of the file."""
+    if not data:
+        return False
+    if filename.lower().endswith(".pdf"):
+        return data.startswith(b"%PDF")
+    head = data[:512].lstrip().lower()
+    return not (head.startswith(b"<!doctype html") or head.startswith(b"<html") or head.startswith(b'{"'))
+
+
 def download_ppt_detailed(
     client: EduplusClient,
     *,
@@ -199,28 +278,32 @@ def download_ppt_detailed(
     dry_run: bool = False,
     overwrite: bool = False,
     keyword: str | None = None,
+    file_types: str | list[str] | tuple[str, ...] | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
-    """Inspect and optionally download PPT/PPTX courseware, returning structured results."""
+    """Inspect and optionally download courseware (PPT/PPTX by default), returning structured results."""
+    types = normalize_file_types(file_types)
+    label = describe_file_types(types)
     detected_course_name = course_name or get_course_name(client, course_id, log=log)
     output_dir = course_output_dir(output_root, course_id, detected_course_name)
-    all_files = collect_courseware(client, course_id)
+    all_files, other_types = collect_courseware_detailed(client, course_id, types)
     files = filter_courseware(all_files, keyword)
     if not files:
-        log("未找到匹配的 PPT/PPTX 课件。" if keyword else "未找到 PPT/PPTX 课件。")
+        log(f"未找到匹配的 {label} 课件。" if keyword and all_files else not_found_message(types, other_types))
         return {
             "exit_code": 0,
             "course_id": course_id,
             "course_name": detected_course_name or "",
             "output_dir": str(output_dir),
             "dry_run": dry_run,
+            "other_file_types": other_types,
             "items": [],
             "downloaded_files": [],
             "failed": [],
         }
 
     files = attach_signed_urls(client, course_id, files, log=log)
-    log(f"找到 {len(files)} 个 PPT/PPTX 文件。")
+    log(f"找到 {len(files)} 个 {label} 文件。")
     if detected_course_name:
         log(f"课程名称：{detected_course_name}")
     log(f"输出目录：{output_dir}")
@@ -247,9 +330,10 @@ def download_ppt_detailed(
     downloaded_files: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
     for index, file in enumerate(files, start=1):
-        filename = safe_filename(file.name, "courseware.ppt")
-        if not re.search(r"\.pptx?$", filename, re.I):
-            filename = f"{filename}.{file.suffix or 'ppt'}"
+        suffix = file.suffix or "ppt"
+        filename = safe_filename(file.name, f"courseware.{suffix}")
+        if not filename.lower().endswith(f".{suffix}"):
+            filename = f"{filename}.{suffix}"
         destination = output_dir / filename
         try:
             if file.signed_url is None:
@@ -257,8 +341,11 @@ def download_ppt_detailed(
             data = client.download_bytes(file.signed_url, referer)
             final_path = destination if overwrite else unique_path(destination)
             final_path.parent.mkdir(parents=True, exist_ok=True)
-            if not looks_like_presentation(data, final_path.name):
-                raise RuntimeError("返回内容不是有效的 PPT/PPTX 文件")
+            if suffix in DEFAULT_FILE_TYPES:
+                if not looks_like_presentation(data, final_path.name):
+                    raise RuntimeError("返回内容不是有效的 PPT/PPTX 文件")
+            elif not looks_like_valid_download(data, final_path.name):
+                raise RuntimeError(f"返回内容不是有效的 {suffix.upper()} 文件")
             final_path.write_bytes(data)
             downloaded_files.append(
                 {
@@ -296,6 +383,7 @@ def download_ppt_files(
     dry_run: bool = False,
     overwrite: bool = False,
     keyword: str | None = None,
+    file_types: str | list[str] | tuple[str, ...] | None = None,
     log: Callable[[str], None] = print,
 ) -> int:
     result = download_ppt_detailed(
@@ -306,6 +394,7 @@ def download_ppt_files(
         dry_run=dry_run,
         overwrite=overwrite,
         keyword=keyword,
+        file_types=file_types,
         log=log,
     )
     return int(result["exit_code"])
